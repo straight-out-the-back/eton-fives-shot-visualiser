@@ -18,6 +18,35 @@ function App() {
   const [showIntro, setShowIntro] = useState(true);
   const [controlsOpen, setControlsOpen] = useState(true);
 
+  // Mobile viewport-height fix: CSS `vh` units are pinned to the LARGEST
+  // possible viewport (address bar hidden), so a `100vh` container is
+  // taller than what's actually visible whenever the address bar is
+  // showing — anything anchored to its bottom edge (sliders, fire button)
+  // renders below the visible area. `100dvh` (set via the .app-root class
+  // below) already fixes this in modern browsers with no JS needed. This
+  // effect is purely a fallback for older browsers that don't support
+  // `dvh` yet: it tracks the real visible height in `--app-vh` and is only
+  // consulted by the `@supports not (height: 100dvh)` rule below.
+  useEffect(() => {
+    function setAppVh() {
+      const vh = (window.visualViewport ? window.visualViewport.height : window.innerHeight) * 0.01;
+      document.documentElement.style.setProperty('--app-vh', `${vh}px`);
+    }
+    setAppVh();
+    window.addEventListener('resize', setAppVh);
+    window.addEventListener('orientationchange', setAppVh);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', setAppVh);
+    }
+    return () => {
+      window.removeEventListener('resize', setAppVh);
+      window.removeEventListener('orientationchange', setAppVh);
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', setAppVh);
+      }
+    };
+  }, []);
+
   useEffect(() => {
     if (!showIntro) return;
     function onKeyDown(e) {
@@ -46,18 +75,9 @@ function App() {
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    // Capped at 2 rather than the raw device ratio — many phones report 3,
-    // which is a lot of extra pixels to render for very little visible
-    // sharpness gain, and was very likely contributing to the "terrible"
-    // feel on mobile (frame rate matters more than crispness for something
-    // you're dragging around).
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     mountNode.appendChild(renderer.domElement);
 
-    // Stops the browser from treating drags/pinches on the canvas as page
-    // scroll/zoom gestures — without this, every attempt to rotate the
-    // camera on a touchscreen fights the browser for control of the
-    // gesture, which is most of why it feels broken on mobile.
     renderer.domElement.style.touchAction = 'none';
 
     const DEG2RAD = Math.PI / 180;
@@ -504,13 +524,7 @@ function App() {
     }
     updateCameraPosition();
 
-    // ---- Pointer/touch input, now multi-touch aware ----
-    // Desktop mouse behaviour (drag to rotate, shift+drag to pan, wheel to
-    // zoom, click to place) is completely unchanged. What's new: with two
-    // touches down, a pinch gesture zooms and a two-finger drag pans —
-    // giving touch users an equivalent to shift+drag/scroll without a
-    // keyboard or mouse wheel.
-    const activePointers = new Map(); // pointerId -> {x, y}
+    const activePointers = new Map();
     let dragStartX = 0, dragStartY = 0, dragMoved = false;
     let pinchStartDist = 0, pinchStartRadius = 0, pinchMidStart = null;
 
@@ -534,7 +548,7 @@ function App() {
         dragStartX = e.clientX;
         dragStartY = e.clientY;
       } else if (activePointers.size === 2) {
-        dragMoved = true; // a second finger landing means this can't be a tap anymore
+        dragMoved = true;
         pinchStartDist = getPointerDistance();
         pinchStartRadius = targetRadius;
         pinchMidStart = getMidpoint();
@@ -550,8 +564,6 @@ function App() {
         if (totalMove < 4) handleFloorClick(e);
       }
 
-      // Dropping back to one finger after a pinch/pan: reset its tracking
-      // point so the camera doesn't jump when it resumes driving rotation.
       if (activePointers.size === 1) {
         const [remaining] = getActivePointerArray();
         dragStartX = remaining.x;
@@ -631,8 +643,6 @@ function App() {
     function toggleButtress() {
       buttressVisible = !buttressVisible;
     }
-    // Exposed so the on-screen buttons (for touch users without a keyboard)
-    // can trigger the exact same behaviour as the R/B keys below.
     resetViewRef.current = resetView;
     toggleButtressRef.current = toggleButtress;
 
@@ -936,11 +946,33 @@ function App() {
   };
 
   return (
-    <div style={{ width: '100vw', height: '100vh', position: 'relative', touchAction: 'none', overscrollBehavior: 'none' }}>
-      {/* Responsive tweaks for small/touch screens — shrinks the control
-          panel and gives the sliders/buttons bigger, easier-to-hit targets
-          without changing anything about how the desktop layout looks. */}
+    <div
+      className="app-root"
+      style={{ width: '100vw', position: 'relative', touchAction: 'none', overscrollBehavior: 'none' }}
+    >
       <style>{`
+        .app-root {
+          /* Fallback for very old browsers with neither dvh nor
+             visualViewport support: plain 100vh (may include the
+             address-bar area, but is still better than nothing). */
+          height: 100vh;
+        }
+        @supports not (height: 100dvh) {
+          .app-root {
+            /* Fallback for browsers with visualViewport/resize support
+               but no dvh: JS-tracked real visible height (see the
+               setAppVh effect above). */
+            height: calc(var(--app-vh, 1vh) * 100);
+          }
+        }
+        @supports (height: 100dvh) {
+          .app-root {
+            /* Modern browsers: this alone already tracks the true
+               visible height as the address bar shows/hides, no JS
+               needed. */
+            height: 100dvh;
+          }
+        }
         @media (max-width: 700px) {
           .control-panel {
             padding: 10px 10px !important;
@@ -995,8 +1027,8 @@ function App() {
               Thanks very much for testing this out!
             </h2>
             <p style={{ margin: '0 0 6px', fontSize: 15, lineHeight: 1.6 }}>
-              This is brand new and very much a work in progress — any and all
-              feedback is really appreciated. Instructions for use are in the top left!
+              This is brand new and very much a work in progress - any and all
+              feedback is really really appreciated! Instructions for how to use this are in the top left.
             </p>
             <p style={{ margin: '22px 0 0', fontSize: 13, color: '#8f8a7d' }}>
               Tap or press space to continue
@@ -1018,9 +1050,6 @@ function App() {
         <div>Click or tap floor: move start position</div>
       </div>
 
-      {/* On-screen equivalents for the R/B keyboard shortcuts, since touch
-          devices have no keyboard. Also handy on desktop for anyone who
-          hasn't spotted the key hints. */}
       <div
         className="corner-buttons"
         style={{ position: 'absolute', top: 16, right: 16, display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 10, maxWidth: '50vw' }}
