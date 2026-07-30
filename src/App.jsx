@@ -6,6 +6,8 @@ function App() {
   const fireShotRef = useRef(() => {});
   const heightRef = useRef(0.3);
   const applyHeightRef = useRef(() => {});
+  const resetViewRef = useRef(() => {});
+  const toggleButtressRef = useRef(() => {});
 
   const [aim, setAim] = useState(0);
   const [loft, setLoft] = useState(20);
@@ -14,6 +16,7 @@ function App() {
   const [topspin, setTopspin] = useState(0);
   const [sidespin, setSidespin] = useState(0);
   const [showIntro, setShowIntro] = useState(true);
+  const [controlsOpen, setControlsOpen] = useState(true);
 
   useEffect(() => {
     if (!showIntro) return;
@@ -43,8 +46,19 @@ function App() {
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
+    // Capped at 2 rather than the raw device ratio — many phones report 3,
+    // which is a lot of extra pixels to render for very little visible
+    // sharpness gain, and was very likely contributing to the "terrible"
+    // feel on mobile (frame rate matters more than crispness for something
+    // you're dragging around).
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     mountNode.appendChild(renderer.domElement);
+
+    // Stops the browser from treating drags/pinches on the canvas as page
+    // scroll/zoom gestures — without this, every attempt to rotate the
+    // camera on a touchscreen fights the browser for control of the
+    // gesture, which is most of why it feels broken on mobile.
+    renderer.domElement.style.touchAction = 'none';
 
     const DEG2RAD = Math.PI / 180;
 
@@ -76,12 +90,6 @@ function App() {
     const LEDGE2_BACK_Y = BACK_STEP_FAR_Y + 1.18;
     const BEVEL_TOP_BACK_STEP_Y = LEDGE2_BACK_Y + BEVEL_DROP;
 
-    // How far the tallest (outer) wall sits recessed behind the middle
-    // wall's face, above the bevel. This is a design choice, not a
-    // measurement, so it's kept as its own constant even though it
-    // currently reuses BEVEL_RUN's value — the bevel wedge below is built
-    // to reach exactly this same offset, so the two can't drift apart
-    // into a gap even if this value changes later.
     const UPPER_WALL_SETBACK = BEVEL_RUN;
 
     const COURT_WIDTH = BACK_STEP_WIDTH;
@@ -97,7 +105,7 @@ function App() {
       return BACK_STEP_NEAR_Y - Math.tan(BACK_STEP_SLOPE) * zInBack;
     }
 
-    const BUTTRESS_HEIGHT = 1.5; // kept as a rough overall-scale reference for the new pier dimensions below
+    const BUTTRESS_HEIGHT = 1.5;
 
     const wallMat = new THREE.MeshStandardMaterial({ color: 0xcdbd94, roughness: 0.9, transparent: true, opacity: 1, side: THREE.DoubleSide });
     const topFloorMat = new THREE.MeshStandardMaterial({ color: 0xc9c4b8, roughness: 1 });
@@ -299,12 +307,7 @@ function App() {
     bevelFront.position.set(0.055, 0, -UPPER_WALL_SETBACK - 0.005);
     scene.add(bevelFront);
 
-    // =================================================================
-    // BUTTRESS — two gable-roofed piers, built from reference photos.
-    // Dimensions are first-pass estimates — replace with real
-    // measurements once available.
-    // =================================================================
-    const BALL_RADIUS = 0.046; // needed here since reflectOffPlane below references it
+    const BALL_RADIUS = 0.046;
 
     function buildGablePier(width, depth, bodyHeight, capHeight, material) {
       const group = new THREE.Group();
@@ -358,8 +361,6 @@ function App() {
     sidePierMesh.position.set(SIDE_PIER.x, SIDE_PIER.y, SIDE_PIER.z);
     scene.add(sidePierMesh);
 
-    // Box3 for each pier's SHAFT only (body.children[0]), not the roof —
-    // the roof is handled separately as sloped planes below.
     mainPierMesh.updateWorldMatrix(true, true);
     sidePierMesh.updateWorldMatrix(true, true);
 
@@ -369,11 +370,7 @@ function App() {
     //scene.add(helper);
     const helper2 = new THREE.Box3Helper(sidePierBodyBox, 0x00ff00);
     //scene.add(helper2);
-    
-    // Collision against an arbitrary flat, finite, tilted rectangle — used
-    // for the roof slopes. Reuses applySpinFriction unchanged (defined
-    // further below, in the physics section) since it already accepts any
-    // normal vector, not just axis-aligned ones.
+
     function reflectOffPlane(pos, vel, omega, planePoint, planeNormal, uAxis, vAxis, uHalf, vHalf, restitution, mu) {
       const rel = pos.clone().sub(planePoint);
       const distAlongNormal = rel.dot(planeNormal);
@@ -448,7 +445,6 @@ function App() {
 
     const sidePierRoofPlanes = getRoofPlanes(SIDE_PIER);
 
-    // ----- the ball -----
     const ball = new THREE.Mesh(
       new THREE.SphereGeometry(BALL_RADIUS, 24, 24),
       new THREE.MeshStandardMaterial({ color: 0xf4f1ea, roughness: 0.4 })
@@ -508,39 +504,105 @@ function App() {
     }
     updateCameraPosition();
 
-    let isDragging = false;
-    let dragStartX = 0, dragStartY = 0, lastX = 0, lastY = 0, dragMoved = false;
+    // ---- Pointer/touch input, now multi-touch aware ----
+    // Desktop mouse behaviour (drag to rotate, shift+drag to pan, wheel to
+    // zoom, click to place) is completely unchanged. What's new: with two
+    // touches down, a pinch gesture zooms and a two-finger drag pans —
+    // giving touch users an equivalent to shift+drag/scroll without a
+    // keyboard or mouse wheel.
+    const activePointers = new Map(); // pointerId -> {x, y}
+    let dragStartX = 0, dragStartY = 0, dragMoved = false;
+    let pinchStartDist = 0, pinchStartRadius = 0, pinchMidStart = null;
+
+    function getActivePointerArray() {
+      return Array.from(activePointers.values());
+    }
+    function getPointerDistance() {
+      const pts = getActivePointerArray();
+      return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    }
+    function getMidpoint() {
+      const pts = getActivePointerArray();
+      return { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+    }
 
     function onPointerDown(e) {
-      isDragging = true;
-      dragMoved = false;
-      dragStartX = lastX = e.clientX;
-      dragStartY = lastY = e.clientY;
-    }
-    function onPointerUp(e) {
-      isDragging = false;
-      const totalMove = Math.hypot(e.clientX - dragStartX, e.clientY - dragStartY);
-      if (!dragMoved && totalMove < 4) handleFloorClick(e);
-    }
-    function onPointerMove(e) {
-      if (!isDragging) return;
-      const dx = e.clientX - lastX;
-      const dy = e.clientY - lastY;
-      lastX = e.clientX; lastY = e.clientY;
-      if (Math.abs(dx) > 1 || Math.abs(dy) > 1) dragMoved = true;
+      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
-      if (e.shiftKey) {
+      if (activePointers.size === 1) {
+        dragMoved = false;
+        dragStartX = e.clientX;
+        dragStartY = e.clientY;
+      } else if (activePointers.size === 2) {
+        dragMoved = true; // a second finger landing means this can't be a tap anymore
+        pinchStartDist = getPointerDistance();
+        pinchStartRadius = targetRadius;
+        pinchMidStart = getMidpoint();
+      }
+    }
+
+    function onPointerUp(e) {
+      const wasSingleTap = activePointers.size === 1 && !dragMoved;
+      activePointers.delete(e.pointerId);
+
+      if (wasSingleTap) {
+        const totalMove = Math.hypot(e.clientX - dragStartX, e.clientY - dragStartY);
+        if (totalMove < 4) handleFloorClick(e);
+      }
+
+      // Dropping back to one finger after a pinch/pan: reset its tracking
+      // point so the camera doesn't jump when it resumes driving rotation.
+      if (activePointers.size === 1) {
+        const [remaining] = getActivePointerArray();
+        dragStartX = remaining.x;
+        dragStartY = remaining.y;
+      }
+    }
+
+    function onPointerCancel(e) {
+      activePointers.delete(e.pointerId);
+    }
+
+    function onPointerMove(e) {
+      if (!activePointers.has(e.pointerId)) return;
+      const prev = activePointers.get(e.pointerId);
+      const dx = e.clientX - prev.x;
+      const dy = e.clientY - prev.y;
+      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      if (activePointers.size === 1) {
+        if (Math.abs(e.clientX - dragStartX) > 4 || Math.abs(e.clientY - dragStartY) > 4) dragMoved = true;
+
+        if (e.shiftKey) {
+          const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+          const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+          const panSpeed = radius * 0.0016;
+          orbitCenter.addScaledVector(right, -dx * panSpeed);
+          orbitCenter.addScaledVector(up, dy * panSpeed);
+        } else {
+          targetTheta -= dx * 0.006;
+          targetPhi -= dy * 0.006;
+          targetPhi = Math.max(MIN_PHI, Math.min(MAX_PHI, targetPhi));
+        }
+      } else if (activePointers.size === 2) {
+        const newDist = getPointerDistance();
+        if (pinchStartDist > 0) {
+          const scale = pinchStartDist / newDist;
+          targetRadius = Math.max(MIN_RADIUS, Math.min(MAX_RADIUS, pinchStartRadius * scale));
+        }
+
+        const newMid = getMidpoint();
+        const midDx = newMid.x - pinchMidStart.x;
+        const midDy = newMid.y - pinchMidStart.y;
         const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
         const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
         const panSpeed = radius * 0.0016;
-        orbitCenter.addScaledVector(right, -dx * panSpeed);
-        orbitCenter.addScaledVector(up, dy * panSpeed);
-      } else {
-        targetTheta -= dx * 0.006;
-        targetPhi -= dy * 0.006;
-        targetPhi = Math.max(MIN_PHI, Math.min(MAX_PHI, targetPhi));
+        orbitCenter.addScaledVector(right, -midDx * panSpeed);
+        orbitCenter.addScaledVector(up, midDy * panSpeed);
+        pinchMidStart = newMid;
       }
     }
+
     function onWheel(e) {
       targetRadius += e.deltaY * 0.006;
       targetRadius = Math.max(MIN_RADIUS, Math.min(MAX_RADIUS, targetRadius));
@@ -552,21 +614,32 @@ function App() {
     }
     renderer.domElement.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerCancel);
     window.addEventListener('pointermove', onPointerMove);
     renderer.domElement.addEventListener('wheel', onWheel, { passive: true });
     window.addEventListener('resize', onResize);
 
     const pressedKeys = new Set();
     let buttressVisible = true;
+
+    function resetView() {
+      targetTheta = DEFAULT_THETA;
+      targetPhi = DEFAULT_PHI;
+      targetRadius = DEFAULT_RADIUS;
+      orbitCenter.copy(DEFAULT_ORBIT_CENTER);
+    }
+    function toggleButtress() {
+      buttressVisible = !buttressVisible;
+    }
+    // Exposed so the on-screen buttons (for touch users without a keyboard)
+    // can trigger the exact same behaviour as the R/B keys below.
+    resetViewRef.current = resetView;
+    toggleButtressRef.current = toggleButtress;
+
     function onKeyDown(e) {
       pressedKeys.add(e.key);
-      if (e.key.toLowerCase() === 'b') buttressVisible = !buttressVisible;
-      if (e.key.toLowerCase() === 'r') {
-        targetTheta = DEFAULT_THETA;
-        targetPhi = DEFAULT_PHI;
-        targetRadius = DEFAULT_RADIUS;
-        orbitCenter.copy(DEFAULT_ORBIT_CENTER);
-      }
+      if (e.key.toLowerCase() === 'b') toggleButtress();
+      if (e.key.toLowerCase() === 'r') resetView();
     }
     function onKeyUp(e) { pressedKeys.delete(e.key); }
     window.addEventListener('keydown', onKeyDown);
@@ -742,7 +815,6 @@ function App() {
           applySpinFriction(vel, omega, new THREE.Vector3(-1, 0, 0), WALL_MU, WALL_RESTITUTION, normalSpeedBefore);
         }
 
-        // buttress: shafts (boxes) + roof slopes (planes) for both piers
         reflectOffBox(pos, vel, omega, mainPierBodyBox.min, mainPierBodyBox.max, BUTTRESS_RESTITUTION, BUTTRESS_MU);
         reflectOffBox(pos, vel, omega, sidePierBodyBox.min, sidePierBodyBox.max, BUTTRESS_RESTITUTION, BUTTRESS_MU);
         for (const plane of mainPierRoofPlanes) {
@@ -828,6 +900,7 @@ function App() {
       cancelAnimationFrame(frameId);
       renderer.domElement.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerCancel);
       window.removeEventListener('pointermove', onPointerMove);
       renderer.domElement.removeEventListener('wheel', onWheel);
       window.removeEventListener('resize', onResize);
@@ -839,7 +912,7 @@ function App() {
   }, []);
 
   const panelStyle = {
-    position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+    position: 'absolute', bottom: 96, left: '50%', transform: 'translateX(-50%)',
     background: 'rgba(26, 28, 31, 0.85)', border: '1px solid rgba(255,255,255,0.08)',
     borderRadius: 10, padding: '16px 22px', display: 'flex', flexWrap: 'wrap',
     gap: 18, alignItems: 'center', justifyContent: 'center', maxWidth: '92vw',
@@ -850,10 +923,60 @@ function App() {
     background: '#cdbd94', color: '#1a1c1f', border: 'none', borderRadius: 8,
     padding: '10px 20px', fontWeight: 600, cursor: 'pointer',
   };
+  const fireButtonStyle = {
+    position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+    background: '#cdbd94', color: '#1a1c1f', border: 'none', borderRadius: 10,
+    padding: '14px 32px', fontWeight: 700, fontSize: 15, cursor: 'pointer',
+    boxShadow: '0 4px 14px rgba(0,0,0,0.35)', WebkitTapHighlightColor: 'transparent',
+  };
+  const cornerButtonStyle = {
+    background: 'rgba(26, 28, 31, 0.85)', color: '#e9e6df', border: '1px solid rgba(255,255,255,0.15)',
+    borderRadius: 8, padding: '10px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+    WebkitTapHighlightColor: 'transparent',
+  };
 
   return (
-    <div style={{ width: '100vw', height: '100vh', position: 'relative' }}>
-      <div ref={mountRef} style={{ width: '100%', height: '100%' }} />
+    <div style={{ width: '100vw', height: '100vh', position: 'relative', touchAction: 'none', overscrollBehavior: 'none' }}>
+      {/* Responsive tweaks for small/touch screens — shrinks the control
+          panel and gives the sliders/buttons bigger, easier-to-hit targets
+          without changing anything about how the desktop layout looks. */}
+      <style>{`
+        @media (max-width: 700px) {
+          .control-panel {
+            padding: 10px 10px !important;
+            gap: 8px !important;
+            bottom: 8px !important;
+            border-radius: 12px !important;
+          }
+          .control-field {
+            width: 27vw !important;
+            min-width: 84px !important;
+          }
+          .control-field label {
+            font-size: 11px !important;
+          }
+          .hint-text {
+            font-size: 10.5px !important;
+            line-height: 1.5 !important;
+            max-width: 55vw;
+          }
+          .fire-button {
+            padding: 12px 18px !important;
+            font-size: 14px !important;
+          }
+          .corner-buttons {
+            top: 8px !important;
+            right: 8px !important;
+            gap: 6px !important;
+          }
+          .corner-buttons button {
+            padding: 10px 12px !important;
+            font-size: 12px !important;
+          }
+        }
+      `}</style>
+
+      <div ref={mountRef} style={{ width: '100%', height: '100%', touchAction: 'none' }} />
 
       {showIntro && (
         <div
@@ -872,56 +995,79 @@ function App() {
               Thanks very much for testing this out!
             </h2>
             <p style={{ margin: '0 0 6px', fontSize: 15, lineHeight: 1.6 }}>
-              This is brand new and very much a work in progress - any and all
-              feedback is really appreciated. Instructions for use are in the top left! And there is currently no working version for mobile (soon!)
+              This is brand new and very much a work in progress — any and all
+              feedback is really appreciated. Instructions for use are in the top left!
             </p>
             <p style={{ margin: '22px 0 0', fontSize: 13, color: '#8f8a7d' }}>
-              Click anywhere or press space to continue
+              Tap or press space to continue
             </p>
           </div>
         </div>
       )}
 
-      <div style={{
-        position: 'absolute', top: 16, left: 16, color: '#8f8a7d', fontSize: 12,
-        lineHeight: 1.7, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-        pointerEvents: 'none',
-      }}>
-        <div>Drag: rotate &nbsp;•&nbsp; Shift+drag: pan &nbsp;•&nbsp; Scroll: zoom</div>
-        <div>Arrow keys: rotate (left and right) and tilt (up and down)</div>
-        <div>R: reset view &nbsp;•&nbsp; B: toggle buttress</div>
-        <div>Click floor: move start position</div>
+      <div
+        className="hint-text"
+        style={{
+          position: 'absolute', top: 16, left: 16, color: '#8f8a7d', fontSize: 12,
+          lineHeight: 1.7, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+          pointerEvents: 'none', maxWidth: '62vw',
+        }}
+      >
+        <div>Drag: rotate &nbsp;•&nbsp; Shift+drag / two-finger drag: pan</div>
+        <div>Scroll / pinch: zoom &nbsp;•&nbsp; Arrow keys: rotate & tilt</div>
+        <div>Click or tap floor: move start position</div>
       </div>
 
-      <div style={panelStyle}>
-        <div style={fieldStyle}>
-          <label>Height: {height.toFixed(2)} m</label>
-          <input type="range" min={0.05} max={3} step={0.05} value={height} onChange={(e) => setHeight(Number(e.target.value))} />
-        </div>
-        <div style={fieldStyle}>
-          <label>Aim: {aim}°</label>
-          <input type="range" min={-90} max={90} value={aim} onChange={(e) => setAim(Number(e.target.value))} />
-        </div>
-        <div style={fieldStyle}>
-          <label>Loft: {loft}°</label>
-          <input type="range" min={-30} max={80} value={loft} onChange={(e) => setLoft(Number(e.target.value))} />
-        </div>
-        <div style={fieldStyle}>
-          <label>Power: {power}%</label>
-          <input type="range" min={0} max={175} value={power} onChange={(e) => setPower(Number(e.target.value))} />
-        </div>
-        <div style={fieldStyle}>
-          <label>Topspin: {topspin}</label>
-          <input type="range" min={-100} max={100} value={topspin} onChange={(e) => setTopspin(Number(e.target.value))} />
-        </div>
-        <div style={fieldStyle}>
-          <label>Sidespin: {sidespin}</label>
-          <input type="range" min={-100} max={100} value={sidespin} onChange={(e) => setSidespin(Number(e.target.value))} />
-        </div>
-        <button style={buttonStyle} onClick={() => fireShotRef.current(aim, power, loft, topspin, sidespin)}>
-          Hit the ball
+      {/* On-screen equivalents for the R/B keyboard shortcuts, since touch
+          devices have no keyboard. Also handy on desktop for anyone who
+          hasn't spotted the key hints. */}
+      <div
+        className="corner-buttons"
+        style={{ position: 'absolute', top: 16, right: 16, display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 10, maxWidth: '50vw' }}
+      >
+        <button style={cornerButtonStyle} onClick={() => resetViewRef.current()}>
+          Reset view
+        </button>
+        <button style={cornerButtonStyle} onClick={() => toggleButtressRef.current()}>
+          Toggle buttress
+        </button>
+        <button style={cornerButtonStyle} onClick={() => setControlsOpen((o) => !o)}>
+          {controlsOpen ? 'Hide' : 'Show'} shot settings
         </button>
       </div>
+
+      {controlsOpen && (
+        <div className="control-panel" style={panelStyle}>
+          <div className="control-field" style={fieldStyle}>
+            <label>Height: {height.toFixed(2)} m</label>
+            <input type="range" min={0.05} max={3} step={0.05} value={height} onChange={(e) => setHeight(Number(e.target.value))} />
+          </div>
+          <div className="control-field" style={fieldStyle}>
+            <label>Aim: {aim}°</label>
+            <input type="range" min={-90} max={90} value={aim} onChange={(e) => setAim(Number(e.target.value))} />
+          </div>
+          <div className="control-field" style={fieldStyle}>
+            <label>Loft: {loft}°</label>
+            <input type="range" min={-30} max={80} value={loft} onChange={(e) => setLoft(Number(e.target.value))} />
+          </div>
+          <div className="control-field" style={fieldStyle}>
+            <label>Power: {power}%</label>
+            <input type="range" min={0} max={175} value={power} onChange={(e) => setPower(Number(e.target.value))} />
+          </div>
+          <div className="control-field" style={fieldStyle}>
+            <label>Topspin: {topspin}</label>
+            <input type="range" min={-100} max={100} value={topspin} onChange={(e) => setTopspin(Number(e.target.value))} />
+          </div>
+          <div className="control-field" style={fieldStyle}>
+            <label>Sidespin: {sidespin}</label>
+            <input type="range" min={-100} max={100} value={sidespin} onChange={(e) => setSidespin(Number(e.target.value))} />
+          </div>
+        </div>
+      )}
+
+      <button className="fire-button" style={fireButtonStyle} onClick={() => fireShotRef.current(aim, power, loft, topspin, sidespin)}>
+        Hit the ball
+      </button>
     </div>
   );
 }
