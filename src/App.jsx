@@ -15,9 +15,6 @@ function App() {
   const [sidespin, setSidespin] = useState(0);
   const [showIntro, setShowIntro] = useState(true);
 
-  // Dismiss the "work in progress" intro popup with the spacebar too, not
-  // just a click. Kept as its own effect (independent of the three.js one
-  // below) so it doesn't need to know anything about the scene/camera.
   useEffect(() => {
     if (!showIntro) return;
     function onKeyDown(e) {
@@ -49,59 +46,49 @@ function App() {
     renderer.setPixelRatio(window.devicePixelRatio);
     mountNode.appendChild(renderer.domElement);
 
-    // =================================================================
-    // COURT DIMENSIONS — all in metres, from real measurements.
-    // z = 0 at the front wall, increasing toward the open back.
-    // Coordinate system origin (y = 0) is set at the back step's highest
-    // point (its edge nearest the top step) — an arbitrary but convenient
-    // reference; every other height is derived relative to it.
-    // =================================================================
     const DEG2RAD = Math.PI / 180;
 
-    const TOP_STEP_DEPTH = 3.06;       // "long" dimension, z-direction
-    const TOP_STEP_FLOOR_WIDTH = 4.00; // playable floor width (inset by the skirting)
+    const TOP_STEP_DEPTH = 3.06;
+    const TOP_STEP_FLOOR_WIDTH = 4.00;
     const TOP_STEP_SLOPE = 2.2 * DEG2RAD;
 
     const BACK_STEP_DEPTH = 4.61;
-    const BACK_STEP_WIDTH = 4.11;      // full wall-to-wall width
+    const BACK_STEP_WIDTH = 4.11;
     const BACK_STEP_SLOPE = 1 * DEG2RAD;
 
-    const STEP_RISER = 0.143; // vertical riser between top step's back edge and back step's front edge
+    const STEP_RISER = 0.143;
 
-    // Height reference points, derived from the slopes/riser above.
-    // NOTE: these must be declared before anything that uses them (LEDGE1_Y,
-    // LEDGE2_BACK_Y, floorHeightAt, wall spans, etc). They were previously
-    // declared further down while being referenced above their own
-    // declaration, which throws "Cannot access before initialization"
-    // (a temporal-dead-zone error) the moment the component mounts.
-    const BACK_STEP_NEAR_Y = 0; // our y = 0 reference
+    const BACK_STEP_NEAR_Y = 0;
     const TOP_STEP_BACK_EDGE_Y = BACK_STEP_NEAR_Y + STEP_RISER;
     const TOP_STEP_FRONT_EDGE_Y = TOP_STEP_BACK_EDGE_Y + Math.tan(TOP_STEP_SLOPE) * TOP_STEP_DEPTH;
     const BACK_STEP_FAR_Y = BACK_STEP_NEAR_Y - Math.tan(BACK_STEP_SLOPE) * BACK_STEP_DEPTH;
 
-    // Wall profile, bottom to top (all "protrusion" values are how far the
-    // wall sticks inward into the court beyond its baseline thin thickness):
-    //   floor -> LEDGE1_Y         : thick base, protrudes LEDGE_SKIRT_THICKNESS (flat step at LEDGE1_Y)
-    //   LEDGE1_Y -> LEDGE2_BASE_Y : baseline thin wall, no protrusion
-    //   LEDGE2_BASE_Y -> +BEVEL_DROP : bevelled transition back to baseline (see note above)
-    // Heights below are all fixed WORLD heights (the ledges run level,
-    // they do not follow the floor's slight slope).
     const LEDGE_SKIRT_THICKNESS = 0.055;
-    const LEDGE1_Y = TOP_STEP_BACK_EDGE_Y + 0.59; // first (flat) ledge, top step — 3 walls
+    const LEDGE1_Y = TOP_STEP_BACK_EDGE_Y + 0.59;
 
-    const LEDGE2_BASE_Y = LEDGE1_Y + 0.78; // second (bevelled) ledge, top step — 3 walls
-    const BEVEL_ANGLE = 34 * DEG2RAD;      // ASSUMPTION: measured from horizontal — confirm
-    const BEVEL_DROP = 0.067;              // vertical extent of the bevel band
-    const BEVEL_RUN = BEVEL_DROP / Math.tan(BEVEL_ANGLE); // horizontal protrusion at the bevel's lowest point
+    const LEDGE2_BASE_Y = LEDGE1_Y + 0.78;
+    const BEVEL_ANGLE = 34 * DEG2RAD;
+    const BEVEL_SLANT_LENGTH = 0.067;
+    const BEVEL_RUN = BEVEL_SLANT_LENGTH * Math.cos(BEVEL_ANGLE);
+    const BEVEL_DROP = BEVEL_SLANT_LENGTH * Math.sin(BEVEL_ANGLE);
+    const BEVEL_TOP_TOP_STEP_Y = LEDGE2_BASE_Y + BEVEL_DROP;
 
-    const LEDGE2_BACK_Y = BACK_STEP_FAR_Y + 1.18; // same bevel, back step — 2 side walls only, measured from the open back
+    const LEDGE2_BACK_Y = BACK_STEP_FAR_Y + 1.18;
+    const BEVEL_TOP_BACK_STEP_Y = LEDGE2_BACK_Y + BEVEL_DROP;
 
-    const COURT_WIDTH = BACK_STEP_WIDTH; // overall wall-to-wall width
+    // How far the tallest (outer) wall sits recessed behind the middle
+    // wall's face, above the bevel. This is a design choice, not a
+    // measurement, so it's kept as its own constant even though it
+    // currently reuses BEVEL_RUN's value — the bevel wedge below is built
+    // to reach exactly this same offset, so the two can't drift apart
+    // into a gap even if this value changes later.
+    const UPPER_WALL_SETBACK = BEVEL_RUN;
+
+    const COURT_WIDTH = BACK_STEP_WIDTH;
     const TOTAL_DEPTH = TOP_STEP_DEPTH + BACK_STEP_DEPTH;
-    const WALL_HEIGHT = 3.66;   // placeholder, unchanged from earlier estimate
-    const LEDGE_HEIGHT = 1.37;  // placeholder "line" ledge height, unchanged for now
+    const WALL_HEIGHT = 3.66;
+    const LEDGE_HEIGHT = 1.37;
 
-    // Continuous floor height as a function of z (no cross-slope in x).
     function floorHeightAt(z) {
       if (z < TOP_STEP_DEPTH) {
         return TOP_STEP_FRONT_EDGE_Y - Math.tan(TOP_STEP_SLOPE) * z;
@@ -110,43 +97,33 @@ function App() {
       return BACK_STEP_NEAR_Y - Math.tan(BACK_STEP_SLOPE) * zInBack;
     }
 
-    // buttress footprint — still placeholder dimensions, just converted to metres
-    const BUTTRESS_HEIGHT = 1.5; // 150cm
+    const BUTTRESS_HEIGHT = 1.5;
     const BUTTRESS_MIN = new THREE.Vector3(0, 0, TOP_STEP_DEPTH - 0.79);
     const BUTTRESS_MAX = new THREE.Vector3(0.98, BUTTRESS_HEIGHT, TOP_STEP_DEPTH + 0.46);
 
-    // ----- materials -----
     const wallMat = new THREE.MeshStandardMaterial({ color: 0xcdbd94, roughness: 0.9, transparent: true, opacity: 1, side: THREE.DoubleSide });
     const topFloorMat = new THREE.MeshStandardMaterial({ color: 0xc9c4b8, roughness: 1 });
     const backFloorMat = new THREE.MeshStandardMaterial({ color: 0xa6a196, roughness: 1 });
     const buttressMat = new THREE.MeshStandardMaterial({ color: 0x8f7a52, roughness: 0.85, transparent: true, opacity: 1 });
     const ledgeMat = new THREE.MeshStandardMaterial({ color: 0x4a4438, roughness: 0.6, transparent: true, opacity: 1 });
-    const skirtMat = new THREE.MeshStandardMaterial({ color: 0xb0a58a, roughness: 0.8 });
+    const skirtMat = new THREE.MeshStandardMaterial({ color: 0xb0a58a, roughness: 0.8, side: THREE.DoubleSide });
     const groundMat = new THREE.MeshStandardMaterial({ color: 0x232527, roughness: 1 });
 
     function fadeMaterial(material, targetOpacity) {
       material.opacity += (targetOpacity - material.opacity) * 0.15;
     }
 
-    // ----- floor slabs, tilted to match the real slopes -----
     const FLOOR_THICKNESS = 0.05;
 
-    // Full court width, not just the inset "playable" width — otherwise a
-    // thin gap opens up at each edge once the skirt (which used to cover
-    // that inset) is hidden from certain camera angles.
     const topFloor = new THREE.Mesh(
       new THREE.BoxGeometry(COURT_WIDTH, FLOOR_THICKNESS, TOP_STEP_DEPTH),
       topFloorMat
     );
     const topFloorMidY = (TOP_STEP_FRONT_EDGE_Y + TOP_STEP_BACK_EDGE_Y) / 2;
     topFloor.position.set(COURT_WIDTH / 2, topFloorMidY - FLOOR_THICKNESS / 2, TOP_STEP_DEPTH / 2);
-    topFloor.rotation.x = TOP_STEP_SLOPE; // tilts so it dips toward +z, matching floorHeightAt
+    topFloor.rotation.x = TOP_STEP_SLOPE;
     scene.add(topFloor);
 
-    // How tall the thick skirting at the base of the walls is, on the top
-    // step: it runs from the (average) floor level up to LEDGE1_Y. This was
-    // referenced below (skirtLeft/Right/Front) but never actually defined —
-    // that's a ReferenceError as soon as this code runs.
     const LEDGE_SKIRT_HEIGHT = LEDGE1_Y - topFloorMidY;
 
     const backFloor = new THREE.Mesh(
@@ -158,9 +135,6 @@ function App() {
     backFloor.rotation.x = BACK_STEP_SLOPE;
     scene.add(backFloor);
 
-    // small riser face connecting the two steps visually — width matches
-    // the full court width (like the floor), not the narrower inset width,
-    // otherwise a gap opens up on each side where it meets the walls.
     const riser = new THREE.Mesh(
       new THREE.BoxGeometry(COURT_WIDTH, STEP_RISER, 0.03),
       backFloorMat
@@ -173,34 +147,26 @@ function App() {
     ground.position.y = BACK_STEP_FAR_Y - 0.1;
     scene.add(ground);
 
-    // Side walls run the full court depth (top step + back step). Each
-    // wall is built the same way as the floor slabs — one tilted segment
-    // per step, rotated to match that step's slope — so the wall's base
-    // sits flush against the sloped floor the whole way along, instead of
-    // a flat-bottomed box that either floats above the floor or clips
-    // through it.
-    const frontWall = new THREE.Mesh(new THREE.BoxGeometry(COURT_WIDTH, WALL_HEIGHT, 0.15), wallMat);
-    frontWall.position.set(COURT_WIDTH / 2, WALL_HEIGHT / 2 + TOP_STEP_FRONT_EDGE_Y, -0.08);
-    scene.add(frontWall);
+    const frontWallLower = new THREE.Mesh(
+      new THREE.BoxGeometry(COURT_WIDTH+0.1, LEDGE2_BASE_Y - TOP_STEP_FRONT_EDGE_Y, 0.15),
+      wallMat
+    );
+    frontWallLower.position.set(COURT_WIDTH / 2, (TOP_STEP_FRONT_EDGE_Y + LEDGE2_BASE_Y) / 2, -0.08);
+    scene.add(frontWallLower);
 
-    // Build a side-wall segment as its actual profile: a trapezoid with a
-    // sloped bottom edge (following floorHeightAt, same slope the floor
-    // uses) but perfectly vertical front/back edges. Rotating a full box to
-    // match the slope (the previous approach) also shears the box's front
-    // face sideways by roughly WALL_HEIGHT * tan(slope) — small angle, but
-    // over a 3.66m wall height that's still several centimetres of gap
-    // against the front wall. Building the exact profile avoids that entirely.
-    function buildSlopedWallSegment(zStart, zEnd, xCenter, thickness) {
-      const yStart = floorHeightAt(zStart);
-      const yEnd = floorHeightAt(zEnd);
+    const frontWallUpper = new THREE.Mesh(
+      new THREE.BoxGeometry(COURT_WIDTH+0.2, TOP_STEP_FRONT_EDGE_Y + WALL_HEIGHT - BEVEL_TOP_TOP_STEP_Y, 0.15),
+      wallMat
+    );
+    frontWallUpper.position.set(COURT_WIDTH / 2, (BEVEL_TOP_TOP_STEP_Y + TOP_STEP_FRONT_EDGE_Y + WALL_HEIGHT) / 2, -0.08 - UPPER_WALL_SETBACK);
+    scene.add(frontWallUpper);
+
+    function buildWallBand(zStart, zEnd, xCenter, thickness, yBottomStart, yBottomEnd, yTopStart, yTopEnd) {
       const shape = new THREE.Shape();
-      // shape's local x is -z (negated) so that, after the rotateY(90°)
-      // below, the local axes land on world (x = thickness dir, z = depth)
-      // with the correct sign and orientation.
-      shape.moveTo(-zStart, yStart);
-      shape.lineTo(-zEnd, yEnd);
-      shape.lineTo(-zEnd, yEnd + WALL_HEIGHT);
-      shape.lineTo(-zStart, yStart + WALL_HEIGHT);
+      shape.moveTo(-zStart, yBottomStart);
+      shape.lineTo(-zEnd, yBottomEnd);
+      shape.lineTo(-zEnd, yTopEnd);
+      shape.lineTo(-zStart, yTopStart);
       shape.closePath();
 
       const geometry = new THREE.ExtrudeGeometry(shape, { depth: thickness, bevelEnabled: false });
@@ -214,25 +180,60 @@ function App() {
 
     const WALL_THICKNESS = 0.15;
 
-    const leftWallTop = buildSlopedWallSegment(0, TOP_STEP_DEPTH, -0.08, WALL_THICKNESS);
+    const leftWallTop = buildWallBand(
+      0, TOP_STEP_DEPTH, -0.08, WALL_THICKNESS,
+      floorHeightAt(0), floorHeightAt(TOP_STEP_DEPTH), LEDGE2_BASE_Y, LEDGE2_BASE_Y
+    );
     scene.add(leftWallTop);
 
-    const leftWallBack = buildSlopedWallSegment(TOP_STEP_DEPTH, TOTAL_DEPTH, -0.08, WALL_THICKNESS);
+    const leftWallBack = buildWallBand(
+      TOP_STEP_DEPTH, TOTAL_DEPTH, -0.08, WALL_THICKNESS,
+      floorHeightAt(TOP_STEP_DEPTH), floorHeightAt(TOTAL_DEPTH), LEDGE2_BACK_Y, LEDGE2_BACK_Y
+    );
     scene.add(leftWallBack);
 
-    const rightWallTop = buildSlopedWallSegment(0, TOP_STEP_DEPTH, COURT_WIDTH + 0.08, WALL_THICKNESS);
+    const rightWallTop = buildWallBand(
+      0, TOP_STEP_DEPTH, COURT_WIDTH + 0.08, WALL_THICKNESS,
+      floorHeightAt(0), floorHeightAt(TOP_STEP_DEPTH), LEDGE2_BASE_Y, LEDGE2_BASE_Y
+    );
     scene.add(rightWallTop);
 
-    const rightWallBack = buildSlopedWallSegment(TOP_STEP_DEPTH, TOTAL_DEPTH, COURT_WIDTH + 0.08, WALL_THICKNESS);
+    const rightWallBack = buildWallBand(
+      TOP_STEP_DEPTH, TOTAL_DEPTH, COURT_WIDTH + 0.08, WALL_THICKNESS,
+      floorHeightAt(TOP_STEP_DEPTH), floorHeightAt(TOTAL_DEPTH), LEDGE2_BACK_Y, LEDGE2_BACK_Y
+    );
     scene.add(rightWallBack);
 
-    const ledge = new THREE.Mesh(new THREE.BoxGeometry(COURT_WIDTH, 0.08, 0.18), ledgeMat);
-    ledge.position.set(COURT_WIDTH / 2, LEDGE_HEIGHT + TOP_STEP_FRONT_EDGE_Y, 0.02);
-    scene.add(ledge);
+    const leftWallTopUpper = buildWallBand(
+      -0.21, TOP_STEP_DEPTH, -0.08 - UPPER_WALL_SETBACK, WALL_THICKNESS,
+      BEVEL_TOP_TOP_STEP_Y, BEVEL_TOP_TOP_STEP_Y, floorHeightAt(0) + WALL_HEIGHT, floorHeightAt(TOP_STEP_DEPTH) + WALL_HEIGHT
+    );
+    scene.add(leftWallTopUpper);
 
-    // the thicker wall base (the real ledge) — wraps left, right, and front
-    // walls, only across the top-step section, protruding inward by
-    // LEDGE_SKIRT_THICKNESS from floor level up to LEDGE_SKIRT_HEIGHT
+    const leftWallBackUpper = buildWallBand(
+      TOP_STEP_DEPTH, TOTAL_DEPTH, -0.08 - UPPER_WALL_SETBACK, WALL_THICKNESS,
+      floorHeightAt(TOP_STEP_DEPTH), floorHeightAt(TOTAL_DEPTH), floorHeightAt(TOP_STEP_DEPTH) + WALL_HEIGHT, floorHeightAt(TOTAL_DEPTH) + WALL_HEIGHT
+    );
+    scene.add(leftWallBackUpper);
+
+    const rightWallTopUpper = buildWallBand(
+      -0.21, TOP_STEP_DEPTH, COURT_WIDTH + 0.08 + UPPER_WALL_SETBACK, WALL_THICKNESS,
+      BEVEL_TOP_TOP_STEP_Y, BEVEL_TOP_TOP_STEP_Y, floorHeightAt(0) + WALL_HEIGHT, floorHeightAt(TOP_STEP_DEPTH) + WALL_HEIGHT
+    );
+    scene.add(rightWallTopUpper);
+
+    const rightWallBackUpper = buildWallBand(
+      TOP_STEP_DEPTH,
+      TOTAL_DEPTH,
+      COURT_WIDTH + 0.08 + UPPER_WALL_SETBACK,
+      WALL_THICKNESS,
+      floorHeightAt(TOP_STEP_DEPTH),
+      floorHeightAt(TOTAL_DEPTH),
+      floorHeightAt(TOP_STEP_DEPTH) + WALL_HEIGHT,
+      floorHeightAt(TOTAL_DEPTH) + WALL_HEIGHT
+    );
+    scene.add(rightWallBackUpper);
+
     const skirtLeft = new THREE.Mesh(
       new THREE.BoxGeometry(LEDGE_SKIRT_THICKNESS, LEDGE_SKIRT_HEIGHT, TOP_STEP_DEPTH),
       skirtMat
@@ -254,7 +255,61 @@ function App() {
     skirtFront.position.set(COURT_WIDTH / 2, topFloorMidY + LEDGE_SKIRT_HEIGHT / 2, LEDGE_SKIRT_THICKNESS / 2);
     scene.add(skirtFront);
 
-    // ----- buttress (visual, placeholder shape until real dimensions confirmed) -----
+    // Exact original wedge shape — 34°, 6.7cm along the slant, unchanged.
+    // The gap wasn't a shape problem, it was a position problem: the wedge
+    // was sitting flush with the middle wall's face and protruding out
+    // into the court, when it actually needed to sit shifted back by
+    // UPPER_WALL_SETBACK so its flush (apex) edge meets the outer wall
+    // and its shelf lip ends up flush with the middle wall's face instead
+    // of overhanging past it. Each instance below is translated by
+    // UPPER_WALL_SETBACK in whichever direction is "away from the court"
+    // for its orientation (±x for the side walls, -z for the front wall).
+    function makeBevelWedgeGeometry(baseY, dropHeight, runDepth, length) {
+      const shape = new THREE.Shape();
+      shape.moveTo(0, baseY);
+      shape.lineTo(runDepth, baseY);
+      shape.lineTo(0, baseY + dropHeight);
+      shape.closePath();
+      return new THREE.ExtrudeGeometry(shape, { depth: length, bevelEnabled: false });
+    }
+
+    const bevelLeftTop = new THREE.Mesh(
+      makeBevelWedgeGeometry(LEDGE2_BASE_Y, BEVEL_DROP, BEVEL_RUN, TOP_STEP_DEPTH+0.055),
+      skirtMat
+    );
+    bevelLeftTop.position.set(-UPPER_WALL_SETBACK - 0.005, 0, -0.055);
+    scene.add(bevelLeftTop);
+
+    const bevelLeftBack = new THREE.Mesh(
+      makeBevelWedgeGeometry(LEDGE2_BACK_Y, BEVEL_DROP, BEVEL_RUN, BACK_STEP_DEPTH),
+      skirtMat
+    );
+    bevelLeftBack.position.set(-UPPER_WALL_SETBACK-0.005, 0, TOP_STEP_DEPTH);
+    scene.add(bevelLeftBack);
+
+    const bevelRightTop = new THREE.Mesh(
+      makeBevelWedgeGeometry(LEDGE2_BASE_Y, BEVEL_DROP, BEVEL_RUN, TOP_STEP_DEPTH+0.055),
+      skirtMat
+    );
+    bevelRightTop.scale.x = -1;
+    bevelRightTop.position.set(COURT_WIDTH + UPPER_WALL_SETBACK+0.005, 0, -0.055);
+    scene.add(bevelRightTop);
+
+    const bevelRightBack = new THREE.Mesh(
+      makeBevelWedgeGeometry(LEDGE2_BACK_Y, BEVEL_DROP, BEVEL_RUN, BACK_STEP_DEPTH),
+      skirtMat
+    );
+    bevelRightBack.scale.x = -1;
+    bevelRightBack.position.set(COURT_WIDTH + UPPER_WALL_SETBACK+0.005, 0, TOP_STEP_DEPTH);
+    scene.add(bevelRightBack);
+
+    const bevelFrontGeo = makeBevelWedgeGeometry(LEDGE2_BASE_Y, BEVEL_DROP, BEVEL_RUN, COURT_WIDTH+0.11);
+    bevelFrontGeo.rotateY(-Math.PI / 2);
+    bevelFrontGeo.translate(COURT_WIDTH, 0, 0);
+    const bevelFront = new THREE.Mesh(bevelFrontGeo, skirtMat);
+    bevelFront.position.set(0.055, 0, -UPPER_WALL_SETBACK-0.005);
+    scene.add(bevelFront);
+
     const buttressFace = new THREE.Mesh(new THREE.BoxGeometry(0.79, BUTTRESS_HEIGHT, 0.91), buttressMat);
     buttressFace.position.set(0.4, BUTTRESS_HEIGHT / 2 + TOP_STEP_BACK_EDGE_Y, TOP_STEP_DEPTH);
     scene.add(buttressFace);
@@ -263,7 +318,6 @@ function App() {
     buttressWing.position.set(0.79, BUTTRESS_HEIGHT / 2 + TOP_STEP_BACK_EDGE_Y, TOP_STEP_DEPTH - 0.58);
     scene.add(buttressWing);
 
-    // ----- the ball -----
     const BALL_RADIUS = 0.046;
     const ball = new THREE.Mesh(
       new THREE.SphereGeometry(BALL_RADIUS, 24, 24),
@@ -292,7 +346,6 @@ function App() {
     }
     applyHeightRef.current = applyHeight;
 
-    // ----- lighting -----
     scene.add(new THREE.AmbientLight(0xffffff, 0.55));
     const keyLight = new THREE.DirectionalLight(0xfff2d9, 0.9);
     keyLight.position.set(4.6, 7.6, 3.0);
@@ -301,7 +354,6 @@ function App() {
     fillLight.position.set(-3.0, 3.0, -4.6);
     scene.add(fillLight);
 
-    // ----- camera orbit (damped, with shift-drag pan and R to reset) -----
     const orbitCenter = new THREE.Vector3(COURT_WIDTH / 2, 0.6, TOTAL_DEPTH * 0.45);
     const DEFAULT_ORBIT_CENTER = orbitCenter.clone();
     const DEFAULT_RADIUS = 7.9;
@@ -423,13 +475,12 @@ function App() {
       trajectoryLine.geometry = new THREE.BufferGeometry();
     }
 
-    // ================= PHYSICS =================
     const GRAVITY = 9.81;
     const DT = 1 / 120;
     const MAX_TIME = 8;
     const MAX_SPIN_RADPS = 45;
 
-    const FLOOR_RESTITUTION = 0.49; // measured from the real court
+    const FLOOR_RESTITUTION = 0.49;
     const FLOOR_MU = 0.45;
 
     const WALL_RESTITUTION = 0.68;
@@ -439,7 +490,7 @@ function App() {
     const BUTTRESS_MU = 0.4;
 
     const I_SPECIFIC = (2 / 5) * BALL_RADIUS * BALL_RADIUS;
-    const STICK_RATIO = 1 + (BALL_RADIUS * BALL_RADIUS) / I_SPECIFIC; // = 3.5 for a solid sphere
+    const STICK_RATIO = 1 + (BALL_RADIUS * BALL_RADIUS) / I_SPECIFIC;
 
     function applySpinFriction(vel, omega, normal, mu, restitution, normalSpeedBefore) {
       const contactOffset = normal.clone().multiplyScalar(-BALL_RADIUS);
@@ -512,7 +563,7 @@ function App() {
     function computeTrajectory(aimDeg, powerPct, loftDeg, topspinPct, sidespinPct) {
       const aimRad = (aimDeg * Math.PI) / 180;
       const loftRad = (loftDeg * Math.PI) / 180;
-      const speed = 1.52 + (powerPct / 100) * 13.7; // m/s
+      const speed = 1.52 + (powerPct / 100) * 13.7;
 
       const pos = START_POS.clone();
       const vel = new THREE.Vector3(
@@ -608,21 +659,26 @@ function App() {
       const frontVisible = camera.position.z >= 0;
 
       leftWallTop.visible = leftVisible;
+      leftWallTopUpper.visible = leftVisible;
       leftWallBack.visible = leftVisible;
+      leftWallBackUpper.visible = leftVisible;
       rightWallTop.visible = rightVisible;
+      rightWallTopUpper.visible = rightVisible;
       rightWallBack.visible = rightVisible;
-      frontWall.visible = frontVisible;
-      ledge.visible = frontVisible;
+      rightWallBackUpper.visible = rightVisible;
+      frontWallLower.visible = frontVisible;
+      frontWallUpper.visible = frontVisible;
 
-      // The skirt is the thick "injogging" ledge running along the base of
-      // each of these three walls — it should disappear along with its wall
-      // so it doesn't keep blocking the view into the court.
       skirtLeft.visible = leftVisible;
       skirtRight.visible = rightVisible;
       skirtFront.visible = frontVisible;
 
-      // The buttress keeps its manual 'B' toggle only — it doesn't hide
-      // based on camera angle like the walls/skirt do.
+      bevelLeftTop.visible = leftVisible;
+      bevelLeftBack.visible = leftVisible;
+      bevelRightTop.visible = rightVisible;
+      bevelRightBack.visible = rightVisible;
+      bevelFront.visible = frontVisible;
+
       buttressFace.visible = buttressVisible;
       buttressWing.visible = buttressVisible;
 
