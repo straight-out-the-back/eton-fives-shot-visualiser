@@ -97,9 +97,7 @@ function App() {
       return BACK_STEP_NEAR_Y - Math.tan(BACK_STEP_SLOPE) * zInBack;
     }
 
-    const BUTTRESS_HEIGHT = 1.5;
-    const BUTTRESS_MIN = new THREE.Vector3(0, 0, TOP_STEP_DEPTH - 0.79);
-    const BUTTRESS_MAX = new THREE.Vector3(0.98, BUTTRESS_HEIGHT, TOP_STEP_DEPTH + 0.46);
+    const BUTTRESS_HEIGHT = 1.5; // kept as a rough overall-scale reference for the new pier dimensions below
 
     const wallMat = new THREE.MeshStandardMaterial({ color: 0xcdbd94, roughness: 0.9, transparent: true, opacity: 1, side: THREE.DoubleSide });
     const topFloorMat = new THREE.MeshStandardMaterial({ color: 0xc9c4b8, roughness: 1 });
@@ -116,11 +114,11 @@ function App() {
     const FLOOR_THICKNESS = 0.05;
 
     const topFloor = new THREE.Mesh(
-      new THREE.BoxGeometry(COURT_WIDTH, FLOOR_THICKNESS, TOP_STEP_DEPTH),
+      new THREE.BoxGeometry(COURT_WIDTH, FLOOR_THICKNESS + 0.14, TOP_STEP_DEPTH),
       topFloorMat
     );
     const topFloorMidY = (TOP_STEP_FRONT_EDGE_Y + TOP_STEP_BACK_EDGE_Y) / 2;
-    topFloor.position.set(COURT_WIDTH / 2, topFloorMidY - FLOOR_THICKNESS / 2, TOP_STEP_DEPTH / 2);
+    topFloor.position.set(COURT_WIDTH / 2, topFloorMidY - FLOOR_THICKNESS / 2 - 0.07, TOP_STEP_DEPTH / 2);
     topFloor.rotation.x = TOP_STEP_SLOPE;
     scene.add(topFloor);
 
@@ -148,14 +146,14 @@ function App() {
     scene.add(ground);
 
     const frontWallLower = new THREE.Mesh(
-      new THREE.BoxGeometry(COURT_WIDTH+0.1, LEDGE2_BASE_Y - TOP_STEP_FRONT_EDGE_Y, 0.15),
+      new THREE.BoxGeometry(COURT_WIDTH + 0.1, LEDGE2_BASE_Y - TOP_STEP_FRONT_EDGE_Y, 0.15),
       wallMat
     );
     frontWallLower.position.set(COURT_WIDTH / 2, (TOP_STEP_FRONT_EDGE_Y + LEDGE2_BASE_Y) / 2, -0.08);
     scene.add(frontWallLower);
 
     const frontWallUpper = new THREE.Mesh(
-      new THREE.BoxGeometry(COURT_WIDTH+0.2, TOP_STEP_FRONT_EDGE_Y + WALL_HEIGHT - BEVEL_TOP_TOP_STEP_Y, 0.15),
+      new THREE.BoxGeometry(COURT_WIDTH + 0.2, TOP_STEP_FRONT_EDGE_Y + WALL_HEIGHT - BEVEL_TOP_TOP_STEP_Y, 0.15),
       wallMat
     );
     frontWallUpper.position.set(COURT_WIDTH / 2, (BEVEL_TOP_TOP_STEP_Y + TOP_STEP_FRONT_EDGE_Y + WALL_HEIGHT) / 2, -0.08 - UPPER_WALL_SETBACK);
@@ -255,15 +253,6 @@ function App() {
     skirtFront.position.set(COURT_WIDTH / 2, topFloorMidY + LEDGE_SKIRT_HEIGHT / 2, LEDGE_SKIRT_THICKNESS / 2);
     scene.add(skirtFront);
 
-    // Exact original wedge shape — 34°, 6.7cm along the slant, unchanged.
-    // The gap wasn't a shape problem, it was a position problem: the wedge
-    // was sitting flush with the middle wall's face and protruding out
-    // into the court, when it actually needed to sit shifted back by
-    // UPPER_WALL_SETBACK so its flush (apex) edge meets the outer wall
-    // and its shelf lip ends up flush with the middle wall's face instead
-    // of overhanging past it. Each instance below is translated by
-    // UPPER_WALL_SETBACK in whichever direction is "away from the court"
-    // for its orientation (±x for the side walls, -z for the front wall).
     function makeBevelWedgeGeometry(baseY, dropHeight, runDepth, length) {
       const shape = new THREE.Shape();
       shape.moveTo(0, baseY);
@@ -274,7 +263,7 @@ function App() {
     }
 
     const bevelLeftTop = new THREE.Mesh(
-      makeBevelWedgeGeometry(LEDGE2_BASE_Y, BEVEL_DROP, BEVEL_RUN, TOP_STEP_DEPTH+0.055),
+      makeBevelWedgeGeometry(LEDGE2_BASE_Y, BEVEL_DROP, BEVEL_RUN, TOP_STEP_DEPTH + 0.055),
       skirtMat
     );
     bevelLeftTop.position.set(-UPPER_WALL_SETBACK - 0.005, 0, -0.055);
@@ -284,15 +273,15 @@ function App() {
       makeBevelWedgeGeometry(LEDGE2_BACK_Y, BEVEL_DROP, BEVEL_RUN, BACK_STEP_DEPTH),
       skirtMat
     );
-    bevelLeftBack.position.set(-UPPER_WALL_SETBACK-0.005, 0, TOP_STEP_DEPTH);
+    bevelLeftBack.position.set(-UPPER_WALL_SETBACK - 0.005, 0, TOP_STEP_DEPTH);
     scene.add(bevelLeftBack);
 
     const bevelRightTop = new THREE.Mesh(
-      makeBevelWedgeGeometry(LEDGE2_BASE_Y, BEVEL_DROP, BEVEL_RUN, TOP_STEP_DEPTH+0.055),
+      makeBevelWedgeGeometry(LEDGE2_BASE_Y, BEVEL_DROP, BEVEL_RUN, TOP_STEP_DEPTH + 0.055),
       skirtMat
     );
     bevelRightTop.scale.x = -1;
-    bevelRightTop.position.set(COURT_WIDTH + UPPER_WALL_SETBACK+0.005, 0, -0.055);
+    bevelRightTop.position.set(COURT_WIDTH + UPPER_WALL_SETBACK + 0.005, 0, -0.055);
     scene.add(bevelRightTop);
 
     const bevelRightBack = new THREE.Mesh(
@@ -300,25 +289,166 @@ function App() {
       skirtMat
     );
     bevelRightBack.scale.x = -1;
-    bevelRightBack.position.set(COURT_WIDTH + UPPER_WALL_SETBACK+0.005, 0, TOP_STEP_DEPTH);
+    bevelRightBack.position.set(COURT_WIDTH + UPPER_WALL_SETBACK + 0.005, 0, TOP_STEP_DEPTH);
     scene.add(bevelRightBack);
 
-    const bevelFrontGeo = makeBevelWedgeGeometry(LEDGE2_BASE_Y, BEVEL_DROP, BEVEL_RUN, COURT_WIDTH+0.11);
+    const bevelFrontGeo = makeBevelWedgeGeometry(LEDGE2_BASE_Y, BEVEL_DROP, BEVEL_RUN, COURT_WIDTH + 0.11);
     bevelFrontGeo.rotateY(-Math.PI / 2);
     bevelFrontGeo.translate(COURT_WIDTH, 0, 0);
     const bevelFront = new THREE.Mesh(bevelFrontGeo, skirtMat);
-    bevelFront.position.set(0.055, 0, -UPPER_WALL_SETBACK-0.005);
+    bevelFront.position.set(0.055, 0, -UPPER_WALL_SETBACK - 0.005);
     scene.add(bevelFront);
 
-    const buttressFace = new THREE.Mesh(new THREE.BoxGeometry(0.79, BUTTRESS_HEIGHT, 0.91), buttressMat);
-    buttressFace.position.set(0.4, BUTTRESS_HEIGHT / 2 + TOP_STEP_BACK_EDGE_Y, TOP_STEP_DEPTH);
-    scene.add(buttressFace);
+    // =================================================================
+    // BUTTRESS — two gable-roofed piers, built from reference photos.
+    // Dimensions are first-pass estimates — replace with real
+    // measurements once available.
+    // =================================================================
+    const BALL_RADIUS = 0.046; // needed here since reflectOffPlane below references it
 
-    const buttressWing = new THREE.Mesh(new THREE.BoxGeometry(0.37, BUTTRESS_HEIGHT, 0.43), buttressMat);
-    buttressWing.position.set(0.79, BUTTRESS_HEIGHT / 2 + TOP_STEP_BACK_EDGE_Y, TOP_STEP_DEPTH - 0.58);
-    scene.add(buttressWing);
+    function buildGablePier(width, depth, bodyHeight, capHeight, material) {
+      const group = new THREE.Group();
 
-    const BALL_RADIUS = 0.046;
+      const body = new THREE.Mesh(new THREE.BoxGeometry(width, bodyHeight, depth), material);
+      body.position.y = bodyHeight / 2;
+      group.add(body);
+
+      const roofShape = new THREE.Shape();
+      roofShape.moveTo(-width / 2, 0);
+      roofShape.lineTo(width / 2, 0);
+      roofShape.lineTo(0, capHeight);
+      roofShape.closePath();
+
+      const roofGeo = new THREE.ExtrudeGeometry(roofShape, { depth, bevelEnabled: false });
+      roofGeo.translate(0, 0, -depth / 2);
+
+      const roof = new THREE.Mesh(roofGeo, material);
+      roof.position.y = bodyHeight;
+      group.add(roof);
+
+      return group;
+    }
+
+    const MAIN_PIER = {
+      width: 0.6,
+      depth: 0.6,
+      bodyHeight: 1.4,
+      capHeight: 0.25,
+      x: 0.4,
+      z: TOP_STEP_DEPTH,
+    };
+    MAIN_PIER.y = floorHeightAt(MAIN_PIER.z);
+
+    const SIDE_PIER = {
+      width: 0.4,
+      depth: 0.4,
+      bodyHeight: 1.0,
+      capHeight: 0.2,
+      x: 0.2,
+      z: TOP_STEP_DEPTH - 0.58,
+    };
+    SIDE_PIER.y = floorHeightAt(SIDE_PIER.z);
+
+    const mainPierMesh = buildGablePier(MAIN_PIER.width, MAIN_PIER.depth, MAIN_PIER.bodyHeight, MAIN_PIER.capHeight, buttressMat);
+    mainPierMesh.position.set(MAIN_PIER.x, MAIN_PIER.y, MAIN_PIER.z);
+    mainPierMesh.rotation.y = Math.PI / 2;
+    scene.add(mainPierMesh);
+
+    const sidePierMesh = buildGablePier(SIDE_PIER.width, SIDE_PIER.depth, SIDE_PIER.bodyHeight, SIDE_PIER.capHeight, buttressMat);
+    sidePierMesh.position.set(SIDE_PIER.x, SIDE_PIER.y, SIDE_PIER.z);
+    scene.add(sidePierMesh);
+
+    // Box3 for each pier's SHAFT only (body.children[0]), not the roof —
+    // the roof is handled separately as sloped planes below.
+    mainPierMesh.updateWorldMatrix(true, true);
+    sidePierMesh.updateWorldMatrix(true, true);
+
+    const mainPierBodyBox = new THREE.Box3().setFromObject(mainPierMesh.children[0]);
+    const sidePierBodyBox = new THREE.Box3().setFromObject(sidePierMesh.children[0]);
+    const helper = new THREE.Box3Helper(mainPierBodyBox, 0xff0000);
+    //scene.add(helper);
+    const helper2 = new THREE.Box3Helper(sidePierBodyBox, 0x00ff00);
+    //scene.add(helper2);
+    
+    // Collision against an arbitrary flat, finite, tilted rectangle — used
+    // for the roof slopes. Reuses applySpinFriction unchanged (defined
+    // further below, in the physics section) since it already accepts any
+    // normal vector, not just axis-aligned ones.
+    function reflectOffPlane(pos, vel, omega, planePoint, planeNormal, uAxis, vAxis, uHalf, vHalf, restitution, mu) {
+      const rel = pos.clone().sub(planePoint);
+      const distAlongNormal = rel.dot(planeNormal);
+      if (distAlongNormal < 0 || distAlongNormal > BALL_RADIUS) return;
+
+      const uCoord = rel.dot(uAxis);
+      const vCoord = rel.dot(vAxis);
+      if (Math.abs(uCoord) > uHalf || Math.abs(vCoord) > vHalf) return;
+
+      pos.addScaledVector(planeNormal, BALL_RADIUS - distAlongNormal);
+      const speedIntoPlane = vel.dot(planeNormal);
+      if (speedIntoPlane < 0) {
+        const normalSpeedBefore = Math.abs(speedIntoPlane);
+        vel.addScaledVector(planeNormal, -(1 + restitution) * speedIntoPlane);
+        applySpinFriction(vel, omega, planeNormal, mu, restitution, normalSpeedBefore);
+      }
+    }
+
+    function getRoofPlanes(pier) {
+      const halfWidth = pier.width / 2;
+      const slopeAngle = Math.atan2(pier.capHeight, halfWidth);
+      const slantLength = Math.hypot(halfWidth, pier.capHeight);
+
+      const normalRight = new THREE.Vector3(Math.sin(slopeAngle), Math.cos(slopeAngle), 0);
+      const pointRight = new THREE.Vector3(pier.x + halfWidth / 2, pier.y + pier.bodyHeight + pier.capHeight / 2, pier.z);
+      const uAxisRight = new THREE.Vector3(Math.cos(slopeAngle), -Math.sin(slopeAngle), 0);
+
+      const normalLeft = new THREE.Vector3(-Math.sin(slopeAngle), Math.cos(slopeAngle), 0);
+      const pointLeft = new THREE.Vector3(pier.x - halfWidth / 2, pier.y + pier.bodyHeight + pier.capHeight / 2, pier.z);
+      const uAxisLeft = new THREE.Vector3(-Math.cos(slopeAngle), -Math.sin(slopeAngle), 0);
+
+      const vAxis = new THREE.Vector3(0, 0, 1);
+
+      return [
+        { point: pointRight, normal: normalRight, uAxis: uAxisRight, vAxis, uHalf: slantLength / 2, vHalf: pier.depth / 2 },
+        { point: pointLeft, normal: normalLeft, uAxis: uAxisLeft, vAxis, uHalf: slantLength / 2, vHalf: pier.depth / 2 },
+      ];
+    }
+    function rotateRoofPlanesY(planes, center, angle) {
+      const rot = new THREE.Matrix4().makeRotationY(angle);
+      const normalMatrix = new THREE.Matrix3().getNormalMatrix(rot);
+
+      return planes.map((plane) => {
+        const point = plane.point.clone().sub(center).applyMatrix4(rot).add(center);
+
+        const normal = plane.normal.clone().applyMatrix3(normalMatrix).normalize();
+        const uAxis = plane.uAxis.clone().applyMatrix3(normalMatrix).normalize();
+        const vAxis = plane.vAxis.clone().applyMatrix3(normalMatrix).normalize();
+
+        return {
+          point,
+          normal,
+          uAxis,
+          vAxis,
+          uHalf: plane.uHalf,
+          vHalf: plane.vHalf,
+        };
+      });
+    }
+
+    const mainPierCenter = new THREE.Vector3(
+      MAIN_PIER.x,
+      MAIN_PIER.y,
+      MAIN_PIER.z
+    );
+
+    const mainPierRoofPlanes = rotateRoofPlanesY(
+      getRoofPlanes(MAIN_PIER),
+      mainPierCenter,
+      Math.PI / 2
+    );
+
+    const sidePierRoofPlanes = getRoofPlanes(SIDE_PIER);
+
+    // ----- the ball -----
     const ball = new THREE.Mesh(
       new THREE.SphereGeometry(BALL_RADIUS, 24, 24),
       new THREE.MeshStandardMaterial({ color: 0xf4f1ea, roughness: 0.4 })
@@ -478,15 +608,15 @@ function App() {
     const GRAVITY = 9.81;
     const DT = 1 / 120;
     const MAX_TIME = 8;
-    const MAX_SPIN_RADPS = 45;
+    const MAX_SPIN_RADPS = 100;
 
-    const FLOOR_RESTITUTION = 0.49;
+    const FLOOR_RESTITUTION = 0.7;
     const FLOOR_MU = 0.45;
 
     const WALL_RESTITUTION = 0.68;
     const WALL_MU = 0.4;
 
-    const BUTTRESS_RESTITUTION = 0.6;
+    const BUTTRESS_RESTITUTION = 0.7;
     const BUTTRESS_MU = 0.4;
 
     const I_SPECIFIC = (2 / 5) * BALL_RADIUS * BALL_RADIUS;
@@ -612,7 +742,15 @@ function App() {
           applySpinFriction(vel, omega, new THREE.Vector3(-1, 0, 0), WALL_MU, WALL_RESTITUTION, normalSpeedBefore);
         }
 
-        reflectOffBox(pos, vel, omega, BUTTRESS_MIN, BUTTRESS_MAX, BUTTRESS_RESTITUTION, BUTTRESS_MU);
+        // buttress: shafts (boxes) + roof slopes (planes) for both piers
+        reflectOffBox(pos, vel, omega, mainPierBodyBox.min, mainPierBodyBox.max, BUTTRESS_RESTITUTION, BUTTRESS_MU);
+        reflectOffBox(pos, vel, omega, sidePierBodyBox.min, sidePierBodyBox.max, BUTTRESS_RESTITUTION, BUTTRESS_MU);
+        for (const plane of mainPierRoofPlanes) {
+          reflectOffPlane(pos, vel, omega, plane.point, plane.normal, plane.uAxis, plane.vAxis, plane.uHalf, plane.vHalf, BUTTRESS_RESTITUTION, BUTTRESS_MU);
+        }
+        for (const plane of sidePierRoofPlanes) {
+          reflectOffPlane(pos, vel, omega, plane.point, plane.normal, plane.uAxis, plane.vAxis, plane.uHalf, plane.vHalf, BUTTRESS_RESTITUTION, BUTTRESS_MU);
+        }
 
         points.push(pos.clone());
         t += DT;
@@ -679,8 +817,8 @@ function App() {
       bevelRightBack.visible = rightVisible;
       bevelFront.visible = frontVisible;
 
-      buttressFace.visible = buttressVisible;
-      buttressWing.visible = buttressVisible;
+      mainPierMesh.visible = buttressVisible;
+      sidePierMesh.visible = buttressVisible;
 
       renderer.render(scene, camera);
     }
@@ -734,7 +872,7 @@ function App() {
               Thanks very much for testing this out!
             </h2>
             <p style={{ margin: '0 0 6px', fontSize: 15, lineHeight: 1.6 }}>
-              This is brand new and very much a work in progress — any and all
+              This is brand new and very much a work in progress - any and all
               feedback is really appreciated. Instructions for use are in the top left! And there is currently no working version for mobile (soon!)
             </p>
             <p style={{ margin: '22px 0 0', fontSize: 13, color: '#8f8a7d' }}>
