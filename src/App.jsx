@@ -11,8 +11,8 @@ function App() {
 
   const [aim, setAim] = useState(0);
   const [loft, setLoft] = useState(20);
-  const [power, setPower] = useState(55);
-  const [height, setHeight] = useState(0.3); // metres above the floor at the strike point
+  const [power, setPower] = useState(80);
+  const [height, setHeight] = useState(1); // metres above the floor at the strike point
   const [topspin, setTopspin] = useState(0);
   const [sidespin, setSidespin] = useState(0);
   const [showIntro, setShowIntro] = useState(true);
@@ -190,12 +190,26 @@ function App() {
     frontWallLower.position.set(COURT_WIDTH / 2, (TOP_STEP_FRONT_EDGE_Y + LEDGE2_BASE_Y) / 2, -0.08);
     scene.add(frontWallLower);
 
+    const frontWallUpperHeight = TOP_STEP_FRONT_EDGE_Y + WALL_HEIGHT - BEVEL_TOP_TOP_STEP_Y + 2.5;
     const frontWallUpper = new THREE.Mesh(
-      new THREE.BoxGeometry(COURT_WIDTH + 0.2, TOP_STEP_FRONT_EDGE_Y + WALL_HEIGHT - BEVEL_TOP_TOP_STEP_Y, 0.15),
+      new THREE.BoxGeometry(COURT_WIDTH + 0.2, frontWallUpperHeight, 0.15),
       wallMat
     );
     frontWallUpper.position.set(COURT_WIDTH / 2, (BEVEL_TOP_TOP_STEP_Y + TOP_STEP_FRONT_EDGE_Y + WALL_HEIGHT) / 2, -0.08 - UPPER_WALL_SETBACK);
     scene.add(frontWallUpper);
+
+    // --- VERTICAL BLACKGUARD LINE (Aesthetic) ---
+    const blackguardMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.8 });
+    const blackguardLine = new THREE.Mesh(
+      new THREE.BoxGeometry(0.02, frontWallUpperHeight, 0.002), // 2cm wide (0.02m)
+      blackguardMat
+    );
+    blackguardLine.position.set(
+      COURT_WIDTH - 1.13, // 113cm (1.13m) from right wall
+      (BEVEL_TOP_TOP_STEP_Y + TOP_STEP_FRONT_EDGE_Y + WALL_HEIGHT) / 2,
+      -0.08 - UPPER_WALL_SETBACK + 0.075 + 0.001 // Flushed on front face of top wall
+    );
+    scene.add(blackguardLine);
 
     function buildWallBand(zStart, zEnd, xCenter, thickness, yBottomStart, yBottomEnd, yTopStart, yTopEnd) {
       const shape = new THREE.Shape();
@@ -240,24 +254,28 @@ function App() {
     );
     scene.add(rightWallBack);
 
+    // Left Wall - Upper Top Step (Updated to reach floor)
     const leftWallTopUpper = buildWallBand(
       -0.21, TOP_STEP_DEPTH, -0.08 - UPPER_WALL_SETBACK, WALL_THICKNESS,
-      BEVEL_TOP_TOP_STEP_Y, BEVEL_TOP_TOP_STEP_Y, floorHeightAt(0) + WALL_HEIGHT, floorHeightAt(TOP_STEP_DEPTH) + WALL_HEIGHT
+      floorHeightAt(0), floorHeightAt(TOP_STEP_DEPTH), floorHeightAt(0) + WALL_HEIGHT, floorHeightAt(TOP_STEP_DEPTH) + WALL_HEIGHT
     );
     scene.add(leftWallTopUpper);
 
+    // Left Wall - Upper Back Step (Stays aligned with floor)
     const leftWallBackUpper = buildWallBand(
       TOP_STEP_DEPTH, TOTAL_DEPTH, -0.08 - UPPER_WALL_SETBACK, WALL_THICKNESS,
       floorHeightAt(TOP_STEP_DEPTH), floorHeightAt(TOTAL_DEPTH), floorHeightAt(TOP_STEP_DEPTH) + WALL_HEIGHT, floorHeightAt(TOTAL_DEPTH) + WALL_HEIGHT
     );
     scene.add(leftWallBackUpper);
 
+    // Right Wall - Upper Top Step (Updated to reach floor)
     const rightWallTopUpper = buildWallBand(
       -0.21, TOP_STEP_DEPTH, COURT_WIDTH + 0.08 + UPPER_WALL_SETBACK, WALL_THICKNESS,
-      BEVEL_TOP_TOP_STEP_Y, BEVEL_TOP_TOP_STEP_Y, floorHeightAt(0) + WALL_HEIGHT, floorHeightAt(TOP_STEP_DEPTH) + WALL_HEIGHT
+      floorHeightAt(0), floorHeightAt(TOP_STEP_DEPTH), floorHeightAt(0) + WALL_HEIGHT, floorHeightAt(TOP_STEP_DEPTH) + WALL_HEIGHT
     );
     scene.add(rightWallTopUpper);
 
+    // Right Wall - Upper Back Step (Stays aligned with floor)
     const rightWallBackUpper = buildWallBand(
       TOP_STEP_DEPTH,
       TOTAL_DEPTH,
@@ -384,44 +402,60 @@ function App() {
 
     // Sloped ledge collision planes
 
-    const bevelNormal = new THREE.Vector3(
-      0,
-      Math.cos(BEVEL_ANGLE),
-      Math.sin(BEVEL_ANGLE)
-    ).normalize();
+    const leftNormal = new THREE.Vector3(Math.sin(BEVEL_ANGLE), Math.cos(BEVEL_ANGLE), 0).normalize();
+    const leftVAxis = new THREE.Vector3(-Math.cos(BEVEL_ANGLE), Math.sin(BEVEL_ANGLE), 0).normalize(); 
 
-    const bevelXAxis = new THREE.Vector3(
-      0,
-      -Math.sin(BEVEL_ANGLE),
-      Math.cos(BEVEL_ANGLE)
-    ).normalize();
+    const rightNormal = new THREE.Vector3(-Math.sin(BEVEL_ANGLE), Math.cos(BEVEL_ANGLE), 0).normalize();
+    const rightVAxis = new THREE.Vector3(Math.cos(BEVEL_ANGLE), Math.sin(BEVEL_ANGLE), 0).normalize();
 
+    const frontNormal = new THREE.Vector3(0, Math.cos(BEVEL_ANGLE), Math.sin(BEVEL_ANGLE)).normalize();
+    const frontVAxis = new THREE.Vector3(0, Math.sin(BEVEL_ANGLE), -Math.cos(BEVEL_ANGLE)).normalize(); 
 
     ledgePlanes.push(
+      // 1. Left Bevel Top Step
       {
-        point: new THREE.Vector3(
-          0,
-          LEDGE2_BASE_Y + BEVEL_DROP,
-          TOP_STEP_DEPTH / 2
-        ),
-        normal: bevelNormal.clone(),
-        uAxis: bevelXAxis.clone(),
-        vAxis: new THREE.Vector3(1,0,0),
-        uHalf: BEVEL_SLANT_LENGTH / 2,
-        vHalf: TOP_STEP_DEPTH / 2
+        point: new THREE.Vector3(-BEVEL_RUN / 2, LEDGE2_BASE_Y + BEVEL_DROP / 2, TOP_STEP_DEPTH / 2),
+        normal: leftNormal.clone(),
+        uAxis: new THREE.Vector3(0, 0, 1),
+        vAxis: leftVAxis.clone(),
+        uHalf: TOP_STEP_DEPTH / 2,
+        vHalf: BEVEL_SLANT_LENGTH / 2
       },
-
+      // 2. Left Bevel Back Step
       {
-        point: new THREE.Vector3(
-          COURT_WIDTH,
-          LEDGE2_BASE_Y + BEVEL_DROP,
-          TOP_STEP_DEPTH / 2
-        ),
-        normal: bevelNormal.clone().multiplyScalar(-1),
-        uAxis: bevelXAxis.clone(),
-        vAxis: new THREE.Vector3(1,0,0),
-        uHalf: BEVEL_SLANT_LENGTH / 2,
-        vHalf: TOP_STEP_DEPTH / 2
+        point: new THREE.Vector3(-BEVEL_RUN / 2, LEDGE2_BACK_Y + BEVEL_DROP / 2, TOP_STEP_DEPTH + BACK_STEP_DEPTH / 2),
+        normal: leftNormal.clone(),
+        uAxis: new THREE.Vector3(0, 0, 1),
+        vAxis: leftVAxis.clone(),
+        uHalf: BACK_STEP_DEPTH / 2,
+        vHalf: BEVEL_SLANT_LENGTH / 2
+      },
+      // 3. Right Bevel Top Step
+      {
+        point: new THREE.Vector3(COURT_WIDTH + BEVEL_RUN / 2, LEDGE2_BASE_Y + BEVEL_DROP / 2, TOP_STEP_DEPTH / 2),
+        normal: rightNormal.clone(),
+        uAxis: new THREE.Vector3(0, 0, 1),
+        vAxis: rightVAxis.clone(),
+        uHalf: TOP_STEP_DEPTH / 2,
+        vHalf: BEVEL_SLANT_LENGTH / 2
+      },
+      // 4. Right Bevel Back Step
+      {
+        point: new THREE.Vector3(COURT_WIDTH + BEVEL_RUN / 2, LEDGE2_BACK_Y + BEVEL_DROP / 2, TOP_STEP_DEPTH + BACK_STEP_DEPTH / 2),
+        normal: rightNormal.clone(),
+        uAxis: new THREE.Vector3(0, 0, 1),
+        vAxis: rightVAxis.clone(),
+        uHalf: BACK_STEP_DEPTH / 2,
+        vHalf: BEVEL_SLANT_LENGTH / 2
+      },
+      // 5. Front Bevel
+      {
+        point: new THREE.Vector3(COURT_WIDTH / 2, LEDGE2_BASE_Y + BEVEL_DROP / 2, -BEVEL_RUN / 2),
+        normal: frontNormal.clone(),
+        uAxis: new THREE.Vector3(1, 0, 0),
+        vAxis: frontVAxis.clone(),
+        uHalf: COURT_WIDTH / 2,
+        vHalf: BEVEL_SLANT_LENGTH / 2
       }
     );
 
@@ -482,33 +516,26 @@ function App() {
 
     const BUTTRESS_GAP_FROM_TOP_STEP = 0.2;
 
+    // Extra height added to the gable cap where it meets the left wall
+    const MAIN_PIER_GABLE_SKEW_Y = 0.18;
+    
     const MAIN_PIER = {
       width: 0.6,
-      depth: 0.7, // extended so the near edge reaches the left wall (was 0.6)
+      depth: 0.85, // Extended depth from 0.7 to 0.85 so the near edge connects into the left wall
       bodyHeight: 1.4,
       capHeight: 0.25,
-      x: 0.35, // recentred so the near edge sits at x=0 (touching the wall) while the far/court-facing edge stays where it was
+      x: 0.275, // Shifted center X to 0.275 (spans x = -0.15 to x = 0.70)
     };
-    // NOTE: because mainPierMesh is rotated 90° about Y further down, its
-    // local "depth" actually governs the pier's extent along world X (how
-    // far it reaches toward the wall), while local "width" governs its
-    // extent along world Z (along the court's length, parallel to the
-    // wall). This position formula needs WIDTH, not depth, to correctly
-    // place the pier's near face relative to the step — using depth here
-    // (as before) would shift the pier along the court every time depth
-    // changes, even though depth no longer affects that direction at all.
     MAIN_PIER.z = TOP_STEP_DEPTH + BUTTRESS_GAP_FROM_TOP_STEP + MAIN_PIER.width / 2;
     MAIN_PIER.y = floorHeightAt(MAIN_PIER.z);
 
     const SIDE_PIER = {
-      width: 0.4,
+      width: 0.55, // Extended width from 0.4 to 0.55 so the near edge connects into the left wall
       depth: 0.4,
-      bodyHeight: 1.3, // raised — was 1.0; total height now 1.5 vs the main pier's 1.65, still a bit smaller
+      bodyHeight: 1.3,
       capHeight: 0.2,
-      x: 0.2,
+      x: 0.125, // Shifted center X to 0.125 (spans x = -0.15 to x = 0.40)
     };
-    // Same width-vs-depth note as above: MAIN_PIER's true world-Z half
-    // extent is width/2, not depth/2.
     SIDE_PIER.z = (MAIN_PIER.z - MAIN_PIER.width / 2) - SIDE_PIER.depth / 2;
     SIDE_PIER.y = floorHeightAt(SIDE_PIER.z);
 
@@ -639,7 +666,7 @@ function App() {
 
     ball.add(outline);
 
-    const START_POS = new THREE.Vector3(COURT_WIDTH / 2, floorHeightAt(TOTAL_DEPTH - 1.2) + 0.3, TOTAL_DEPTH - 1.2);
+    const START_POS = new THREE.Vector3(COURT_WIDTH / 2, floorHeightAt(TOTAL_DEPTH - 1.2) + 1, TOTAL_DEPTH - 1.2);
     ball.position.copy(START_POS);
     scene.add(ball);
 
@@ -978,21 +1005,41 @@ function App() {
           applySpinFriction(vel, omega, new THREE.Vector3(0, 1, 0), FLOOR_MU, FLOOR_RESTITUTION, normalSpeedBefore);
         }
 
-        if (pos.z - BALL_RADIUS < 0) {
+        // 1. Determine dynamic wall boundaries based on the inner playing surfaces
+        const WALL_HALF_THICKNESS = 0.075; // 0.15 / 2
+
+        // Base inner surface positions for lower walls
+        let currentLeftWallX = -0.08 + WALL_HALF_THICKNESS;               // Inner surface at -0.005
+        let currentRightWallX = COURT_WIDTH + 0.08 - WALL_HALF_THICKNESS; // Inner surface at COURT_WIDTH + 0.005
+        let currentFrontWallZ = -0.08 + WALL_HALF_THICKNESS;              // Inner surface at -0.005
+
+        let floorZoneZ = pos.z;
+        let bevelBaseY = (floorZoneZ < TOP_STEP_DEPTH) ? LEDGE2_BASE_Y : LEDGE2_BACK_Y;
+        let bevelTopY = bevelBaseY + BEVEL_DROP;
+
+        // Push boundaries outward if the ball is above the sloped bevel ledge
+        if (pos.y > bevelTopY) {
+            currentLeftWallX = -0.08 - UPPER_WALL_SETBACK + WALL_HALF_THICKNESS;               // -0.005 - UPPER_WALL_SETBACK
+            currentRightWallX = COURT_WIDTH + 0.08 + UPPER_WALL_SETBACK - WALL_HALF_THICKNESS; // COURT_WIDTH + 0.005 + UPPER_WALL_SETBACK
+            currentFrontWallZ = -0.08 - UPPER_WALL_SETBACK + WALL_HALF_THICKNESS;
+        }
+
+        // 2. Apply boundary checks using the dynamic variables
+        if (pos.z - BALL_RADIUS < currentFrontWallZ) {
           const normalSpeedBefore = Math.abs(vel.z);
-          pos.z = BALL_RADIUS;
+          pos.z = currentFrontWallZ + BALL_RADIUS;
           vel.z = -vel.z * WALL_RESTITUTION;
           applySpinFriction(vel, omega, new THREE.Vector3(0, 0, 1), WALL_MU, WALL_RESTITUTION, normalSpeedBefore);
         }
-        if (pos.x - BALL_RADIUS < -0.08) {
+        if (pos.x - BALL_RADIUS < currentLeftWallX) {
           const normalSpeedBefore = Math.abs(vel.x);
-          pos.x = -0.08 + BALL_RADIUS;
+          pos.x = currentLeftWallX + BALL_RADIUS;
           vel.x = -vel.x * WALL_RESTITUTION;
           applySpinFriction(vel, omega, new THREE.Vector3(1, 0, 0), WALL_MU, WALL_RESTITUTION, normalSpeedBefore);
         }
-        if (pos.x + BALL_RADIUS > COURT_WIDTH + 0.08) {
+        if (pos.x + BALL_RADIUS > currentRightWallX) {
           const normalSpeedBefore = Math.abs(vel.x);
-          pos.x = COURT_WIDTH + 0.08 - BALL_RADIUS;
+          pos.x = currentRightWallX - BALL_RADIUS;
           vel.x = -vel.x * WALL_RESTITUTION;
           applySpinFriction(vel, omega, new THREE.Vector3(-1, 0, 0), WALL_MU, WALL_RESTITUTION, normalSpeedBefore);
         }
@@ -1128,6 +1175,7 @@ function App() {
       rightWallBackUpper.visible = rightVisible;
       frontWallLower.visible = frontVisible;
       frontWallUpper.visible = frontVisible;
+      blackguardLine.visible = frontVisible;
 
       skirtLeft.visible = leftVisible;
       skirtRight.visible = rightVisible;
