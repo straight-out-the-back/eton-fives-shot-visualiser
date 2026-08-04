@@ -18,15 +18,6 @@ function App() {
   const [showIntro, setShowIntro] = useState(true);
   const [controlsOpen, setControlsOpen] = useState(true);
 
-  // Mobile viewport-height fix: CSS `vh` units are pinned to the LARGEST
-  // possible viewport (address bar hidden), so a `100vh` container is
-  // taller than what's actually visible whenever the address bar is
-  // showing — anything anchored to its bottom edge (sliders, fire button)
-  // renders below the visible area. `100dvh` (set via the .app-root class
-  // below) already fixes this in modern browsers with no JS needed. This
-  // effect is purely a fallback for older browsers that don't support
-  // `dvh` yet: it tracks the real visible height in `--app-vh` and is only
-  // consulted by the `@supports not (height: 100dvh)` rule below.
   useEffect(() => {
     function setAppVh() {
       const vh = (window.visualViewport ? window.visualViewport.height : window.innerHeight) * 0.01;
@@ -127,12 +118,12 @@ function App() {
 
     const BUTTRESS_HEIGHT = 1.5;
 
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0xcdbd94, roughness: 0.9, transparent: true, opacity: 1, side: THREE.DoubleSide });
-    const topFloorMat = new THREE.MeshStandardMaterial({ color: 0xc9c4b8, roughness: 1 });
-    const backFloorMat = new THREE.MeshStandardMaterial({ color: 0xa6a196, roughness: 1 });
-    const buttressMat = new THREE.MeshStandardMaterial({ color: 0x8f7a52, roughness: 0.85, transparent: true, opacity: 1 });
-    const ledgeMat = new THREE.MeshStandardMaterial({ color: 0x4a4438, roughness: 0.6, transparent: true, opacity: 1 });
-    const skirtMat = new THREE.MeshStandardMaterial({ color: 0xb0a58a, roughness: 0.8, side: THREE.DoubleSide });
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0xb0a37e, roughness: 0.8, transparent: true, opacity: 1, side: THREE.DoubleSide });
+    const topFloorMat = new THREE.MeshStandardMaterial({ color: 0xa8a39a, roughness: 1 });
+    const backFloorMat = new THREE.MeshStandardMaterial({ color: 0x87837b, roughness: 1 });
+    const buttressMat = new THREE.MeshStandardMaterial({ color: 0xa89d88, roughness: 0.95, transparent: true, opacity: 1 });
+    const ledgeMat = new THREE.MeshStandardMaterial({ color: 0x35322d, roughness: 0.5, transparent: true, opacity: 1 });
+    const skirtMat = new THREE.MeshStandardMaterial({ color: 0xb0a58a, roughness: 0.9, side: THREE.DoubleSide });
     const groundMat = new THREE.MeshStandardMaterial({ color: 0x232527, roughness: 1 });
 
     function fadeMaterial(material, targetOpacity) {
@@ -167,6 +158,25 @@ function App() {
     );
     riser.position.set(COURT_WIDTH / 2, TOP_STEP_BACK_EDGE_Y - STEP_RISER / 2, TOP_STEP_DEPTH);
     scene.add(riser);
+
+
+    const riserPlane = {
+      point: new THREE.Vector3(
+        COURT_WIDTH / 2,
+        TOP_STEP_BACK_EDGE_Y - STEP_RISER / 2,
+        TOP_STEP_DEPTH
+      ),
+
+      normal: new THREE.Vector3(0, 0, 1),
+
+      uAxis: new THREE.Vector3(1, 0, 0),
+      vAxis: new THREE.Vector3(0, 1, 0),
+
+      uHalf: COURT_WIDTH / 2,
+      vHalf: STEP_RISER / 2
+    };
+    
+    const ledgePlanes = [];
 
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), groundMat);
     ground.rotation.x = -Math.PI / 2;
@@ -281,6 +291,58 @@ function App() {
     skirtFront.position.set(COURT_WIDTH / 2, topFloorMidY + LEDGE_SKIRT_HEIGHT / 2, LEDGE_SKIRT_THICKNESS / 2);
     scene.add(skirtFront);
 
+    const skirtLeftBox = new THREE.Box3().setFromObject(skirtLeft);
+    const skirtRightBox = new THREE.Box3().setFromObject(skirtRight);
+    const skirtFrontBox = new THREE.Box3().setFromObject(skirtFront);
+
+        // Flat ledge collision planes
+
+    const leftFlatLedgePlane = {
+      point: new THREE.Vector3(
+        0,
+        LEDGE1_Y,
+        TOP_STEP_DEPTH / 2
+      ),
+      normal: new THREE.Vector3(0, 1, 0),
+      uAxis: new THREE.Vector3(0, 0, 1),
+      vAxis: new THREE.Vector3(1, 0, 0),
+      uHalf: TOP_STEP_DEPTH / 2,
+      vHalf: LEDGE_SKIRT_THICKNESS / 2
+    };
+
+    const rightFlatLedgePlane = {
+      point: new THREE.Vector3(
+        COURT_WIDTH,
+        LEDGE1_Y,
+        TOP_STEP_DEPTH / 2
+      ),
+      normal: new THREE.Vector3(0, 1, 0),
+      uAxis: new THREE.Vector3(0, 0, 1),
+      vAxis: new THREE.Vector3(1, 0, 0),
+      uHalf: TOP_STEP_DEPTH / 2,
+      vHalf: LEDGE_SKIRT_THICKNESS / 2
+    };
+
+    const frontFlatLedgePlane = {
+      point: new THREE.Vector3(
+        COURT_WIDTH / 2,
+        LEDGE1_Y,
+        0
+      ),
+      normal: new THREE.Vector3(0, 1, 0),
+      uAxis: new THREE.Vector3(1, 0, 0),
+      vAxis: new THREE.Vector3(0, 0, 1),
+      uHalf: COURT_WIDTH / 2,
+      vHalf: LEDGE_SKIRT_THICKNESS / 2
+    };
+
+
+    ledgePlanes.push(
+      leftFlatLedgePlane,
+      rightFlatLedgePlane,
+      frontFlatLedgePlane
+    );
+
     function makeBevelWedgeGeometry(baseY, dropHeight, runDepth, length) {
       const shape = new THREE.Shape();
       shape.moveTo(0, baseY);
@@ -320,6 +382,49 @@ function App() {
     bevelRightBack.position.set(COURT_WIDTH + UPPER_WALL_SETBACK + 0.005, 0, TOP_STEP_DEPTH);
     scene.add(bevelRightBack);
 
+    // Sloped ledge collision planes
+
+    const bevelNormal = new THREE.Vector3(
+      0,
+      Math.cos(BEVEL_ANGLE),
+      Math.sin(BEVEL_ANGLE)
+    ).normalize();
+
+    const bevelXAxis = new THREE.Vector3(
+      0,
+      -Math.sin(BEVEL_ANGLE),
+      Math.cos(BEVEL_ANGLE)
+    ).normalize();
+
+
+    ledgePlanes.push(
+      {
+        point: new THREE.Vector3(
+          0,
+          LEDGE2_BASE_Y + BEVEL_DROP,
+          TOP_STEP_DEPTH / 2
+        ),
+        normal: bevelNormal.clone(),
+        uAxis: bevelXAxis.clone(),
+        vAxis: new THREE.Vector3(1,0,0),
+        uHalf: BEVEL_SLANT_LENGTH / 2,
+        vHalf: TOP_STEP_DEPTH / 2
+      },
+
+      {
+        point: new THREE.Vector3(
+          COURT_WIDTH,
+          LEDGE2_BASE_Y + BEVEL_DROP,
+          TOP_STEP_DEPTH / 2
+        ),
+        normal: bevelNormal.clone().multiplyScalar(-1),
+        uAxis: bevelXAxis.clone(),
+        vAxis: new THREE.Vector3(1,0,0),
+        uHalf: BEVEL_SLANT_LENGTH / 2,
+        vHalf: TOP_STEP_DEPTH / 2
+      }
+    );
+
     const bevelFrontGeo = makeBevelWedgeGeometry(LEDGE2_BASE_Y, BEVEL_DROP, BEVEL_RUN, COURT_WIDTH + 0.11);
     bevelFrontGeo.rotateY(-Math.PI / 2);
     bevelFrontGeo.translate(COURT_WIDTH, 0, 0);
@@ -327,7 +432,7 @@ function App() {
     bevelFront.position.set(0.055, 0, -UPPER_WALL_SETBACK - 0.005);
     scene.add(bevelFront);
 
-    const BALL_RADIUS = 0.046;
+    const BALL_RADIUS = 0.023;
 
     function buildGablePier(width, depth, bodyHeight, capHeight, material) {
       const group = new THREE.Group();
@@ -352,24 +457,59 @@ function App() {
       return group;
     }
 
+    function buildSlopedLedgePier(width, depth, bodyHeight, capHeight, material) {
+      const group = new THREE.Group();
+
+      const body = new THREE.Mesh(new THREE.BoxGeometry(width, bodyHeight, depth), material);
+      body.position.y = bodyHeight / 2;
+      group.add(body);
+
+      const capShape = new THREE.Shape();
+      capShape.moveTo(-width / 2, capHeight);
+      capShape.lineTo(width / 2, 0);
+      capShape.lineTo(-width / 2, 0);
+      capShape.closePath();
+
+      const capGeo = new THREE.ExtrudeGeometry(capShape, { depth, bevelEnabled: false });
+      capGeo.translate(0, 0, -depth / 2);
+
+      const cap = new THREE.Mesh(capGeo, material);
+      cap.position.y = bodyHeight;
+      group.add(cap);
+
+      return group;
+    }
+
+    const BUTTRESS_GAP_FROM_TOP_STEP = 0.2;
+
     const MAIN_PIER = {
       width: 0.6,
-      depth: 0.6,
+      depth: 0.7, // extended so the near edge reaches the left wall (was 0.6)
       bodyHeight: 1.4,
       capHeight: 0.25,
-      x: 0.4,
-      z: TOP_STEP_DEPTH,
+      x: 0.35, // recentred so the near edge sits at x=0 (touching the wall) while the far/court-facing edge stays where it was
     };
+    // NOTE: because mainPierMesh is rotated 90° about Y further down, its
+    // local "depth" actually governs the pier's extent along world X (how
+    // far it reaches toward the wall), while local "width" governs its
+    // extent along world Z (along the court's length, parallel to the
+    // wall). This position formula needs WIDTH, not depth, to correctly
+    // place the pier's near face relative to the step — using depth here
+    // (as before) would shift the pier along the court every time depth
+    // changes, even though depth no longer affects that direction at all.
+    MAIN_PIER.z = TOP_STEP_DEPTH + BUTTRESS_GAP_FROM_TOP_STEP + MAIN_PIER.width / 2;
     MAIN_PIER.y = floorHeightAt(MAIN_PIER.z);
 
     const SIDE_PIER = {
       width: 0.4,
       depth: 0.4,
-      bodyHeight: 1.0,
+      bodyHeight: 1.3, // raised — was 1.0; total height now 1.5 vs the main pier's 1.65, still a bit smaller
       capHeight: 0.2,
       x: 0.2,
-      z: TOP_STEP_DEPTH - 0.58,
     };
+    // Same width-vs-depth note as above: MAIN_PIER's true world-Z half
+    // extent is width/2, not depth/2.
+    SIDE_PIER.z = (MAIN_PIER.z - MAIN_PIER.width / 2) - SIDE_PIER.depth / 2;
     SIDE_PIER.y = floorHeightAt(SIDE_PIER.z);
 
     const mainPierMesh = buildGablePier(MAIN_PIER.width, MAIN_PIER.depth, MAIN_PIER.bodyHeight, MAIN_PIER.capHeight, buttressMat);
@@ -377,7 +517,7 @@ function App() {
     mainPierMesh.rotation.y = Math.PI / 2;
     scene.add(mainPierMesh);
 
-    const sidePierMesh = buildGablePier(SIDE_PIER.width, SIDE_PIER.depth, SIDE_PIER.bodyHeight, SIDE_PIER.capHeight, buttressMat);
+    const sidePierMesh = buildSlopedLedgePier(SIDE_PIER.width, SIDE_PIER.depth, SIDE_PIER.bodyHeight, SIDE_PIER.capHeight, buttressMat);
     sidePierMesh.position.set(SIDE_PIER.x, SIDE_PIER.y, SIDE_PIER.z);
     scene.add(sidePierMesh);
 
@@ -391,18 +531,24 @@ function App() {
     const helper2 = new THREE.Box3Helper(sidePierBodyBox, 0x00ff00);
     //scene.add(helper2);
 
-    function reflectOffPlane(pos, vel, omega, planePoint, planeNormal, uAxis, vAxis, uHalf, vHalf, restitution, mu) {
-      const rel = pos.clone().sub(planePoint);
-      const distAlongNormal = rel.dot(planeNormal);
-      if (distAlongNormal < 0 || distAlongNormal > BALL_RADIUS) return;
+    function reflectOffPlane(prevPos, pos, vel, omega, planePoint, planeNormal, uAxis, vAxis, uHalf, vHalf, restitution, mu) {
+      const relNow = pos.clone().sub(planePoint);
+      const distNow = relNow.dot(planeNormal);
 
-      const uCoord = rel.dot(uAxis);
-      const vCoord = rel.dot(vAxis);
+      const relPrev = prevPos.clone().sub(planePoint);
+      const distPrev = relPrev.dot(planeNormal);
+
+      const currentlyTouching = distNow >= 0 && distNow <= BALL_RADIUS;
+      const tunnelledThrough = distPrev > BALL_RADIUS && distNow <= BALL_RADIUS;
+      if (!currentlyTouching && !tunnelledThrough) return;
+
+      const uCoord = relNow.dot(uAxis);
+      const vCoord = relNow.dot(vAxis);
       if (Math.abs(uCoord) > uHalf || Math.abs(vCoord) > vHalf) return;
 
-      pos.addScaledVector(planeNormal, BALL_RADIUS - distAlongNormal);
+      pos.addScaledVector(planeNormal, BALL_RADIUS - distNow);
       const speedIntoPlane = vel.dot(planeNormal);
-      if (speedIntoPlane < 0) {
+      if (speedIntoPlane < -0.05) {
         const normalSpeedBefore = Math.abs(speedIntoPlane);
         vel.addScaledVector(planeNormal, -(1 + restitution) * speedIntoPlane);
         applySpinFriction(vel, omega, planeNormal, mu, restitution, normalSpeedBefore);
@@ -429,6 +575,24 @@ function App() {
         { point: pointLeft, normal: normalLeft, uAxis: uAxisLeft, vAxis, uHalf: slantLength / 2, vHalf: pier.depth / 2 },
       ];
     }
+
+    function getSlopedLedgePlane(pier) {
+      const halfWidth = pier.width / 2;
+      const slantLength = Math.hypot(pier.width, pier.capHeight);
+
+      const uAxis = new THREE.Vector3(pier.width, -pier.capHeight, 0).normalize();
+      const normal = new THREE.Vector3(pier.capHeight, pier.width, 0).normalize();
+      const vAxis = new THREE.Vector3(0, 0, 1);
+
+      const point = new THREE.Vector3(
+        pier.x,
+        pier.y + pier.bodyHeight + pier.capHeight / 2,
+        pier.z
+      );
+
+      return [{ point, normal, uAxis, vAxis, uHalf: slantLength / 2, vHalf: pier.depth / 2 }];
+    }
+
     function rotateRoofPlanesY(planes, center, angle) {
       const rot = new THREE.Matrix4().makeRotationY(angle);
       const normalMatrix = new THREE.Matrix3().getNormalMatrix(rot);
@@ -451,30 +615,37 @@ function App() {
       });
     }
 
-    const mainPierCenter = new THREE.Vector3(
-      MAIN_PIER.x,
-      MAIN_PIER.y,
-      MAIN_PIER.z
-    );
+    const mainPierCenter = new THREE.Vector3(MAIN_PIER.x, MAIN_PIER.y, MAIN_PIER.z);
 
-    const mainPierRoofPlanes = rotateRoofPlanesY(
-      getRoofPlanes(MAIN_PIER),
-      mainPierCenter,
-      Math.PI / 2
-    );
-
-    const sidePierRoofPlanes = getRoofPlanes(SIDE_PIER);
+    const mainPierRoofPlanes = rotateRoofPlanesY(getRoofPlanes(MAIN_PIER), mainPierCenter, Math.PI / 2);
+    const sidePierRoofPlanes = getSlopedLedgePlane(SIDE_PIER);
 
     const ball = new THREE.Mesh(
       new THREE.SphereGeometry(BALL_RADIUS, 24, 24),
-      new THREE.MeshStandardMaterial({ color: 0xf4f1ea, roughness: 0.4 })
+      new THREE.MeshStandardMaterial({
+          color: 0xffffff,
+          roughness: 0.15,
+          metalness: 0
+      })
     );
+
+    const outline = new THREE.Mesh(
+        new THREE.SphereGeometry(BALL_RADIUS * 1.08, 24, 24),
+        new THREE.MeshBasicMaterial({
+            color: 0x222222,
+            side: THREE.BackSide
+        })
+    );
+
+    ball.add(outline);
+
     const START_POS = new THREE.Vector3(COURT_WIDTH / 2, floorHeightAt(TOTAL_DEPTH - 1.2) + 0.3, TOTAL_DEPTH - 1.2);
     ball.position.copy(START_POS);
     scene.add(ball);
 
-    const lineMat = new THREE.LineBasicMaterial({ color: 0xffd27a, transparent: true, opacity: 0.6 });
+    const lineMat = new THREE.LineBasicMaterial({ color: 0xffd27a, transparent: true, opacity: 0.4 });
     let trajectoryLine = new THREE.Line(new THREE.BufferGeometry(), lineMat);
+    //trajectoryLine.visible = false;
     scene.add(trajectoryLine);
 
     const startMarker = new THREE.Mesh(
@@ -492,8 +663,8 @@ function App() {
     }
     applyHeightRef.current = applyHeight;
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
-    const keyLight = new THREE.DirectionalLight(0xfff2d9, 0.9);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.65));
+    const keyLight = new THREE.DirectionalLight(0xfff2d9, 1.1);
     keyLight.position.set(4.6, 7.6, 3.0);
     scene.add(keyLight);
     const fillLight = new THREE.DirectionalLight(0x9db4c0, 0.35);
@@ -795,11 +966,12 @@ function App() {
       let t = 0;
 
       while (t < MAX_TIME) {
+        const prevPos = pos.clone();
         vel.y -= GRAVITY * DT;
         pos.addScaledVector(vel, DT);
 
         const floorY = floorHeightAt(pos.z);
-        if (pos.y - BALL_RADIUS < floorY) {
+        if (pos.y - BALL_RADIUS < floorY && vel.y < 0) {
           const normalSpeedBefore = Math.abs(vel.y);
           pos.y = floorY + BALL_RADIUS;
           vel.y = -vel.y * FLOOR_RESTITUTION;
@@ -812,26 +984,94 @@ function App() {
           vel.z = -vel.z * WALL_RESTITUTION;
           applySpinFriction(vel, omega, new THREE.Vector3(0, 0, 1), WALL_MU, WALL_RESTITUTION, normalSpeedBefore);
         }
-        if (pos.x - BALL_RADIUS < 0) {
+        if (pos.x - BALL_RADIUS < -0.08) {
           const normalSpeedBefore = Math.abs(vel.x);
-          pos.x = BALL_RADIUS;
+          pos.x = -0.08 + BALL_RADIUS;
           vel.x = -vel.x * WALL_RESTITUTION;
           applySpinFriction(vel, omega, new THREE.Vector3(1, 0, 0), WALL_MU, WALL_RESTITUTION, normalSpeedBefore);
         }
-        if (pos.x + BALL_RADIUS > COURT_WIDTH) {
+        if (pos.x + BALL_RADIUS > COURT_WIDTH + 0.08) {
           const normalSpeedBefore = Math.abs(vel.x);
-          pos.x = COURT_WIDTH - BALL_RADIUS;
+          pos.x = COURT_WIDTH + 0.08 - BALL_RADIUS;
           vel.x = -vel.x * WALL_RESTITUTION;
           applySpinFriction(vel, omega, new THREE.Vector3(-1, 0, 0), WALL_MU, WALL_RESTITUTION, normalSpeedBefore);
+        }
+
+        reflectOffBox(
+          pos,
+          vel,
+          omega,
+          skirtLeftBox.min,
+          skirtLeftBox.max,
+          WALL_RESTITUTION,
+          WALL_MU
+        );
+
+        reflectOffBox(
+          pos,
+          vel,
+          omega,
+          skirtRightBox.min,
+          skirtRightBox.max,
+          WALL_RESTITUTION,
+          WALL_MU
+        );
+
+        reflectOffBox(
+          pos,
+          vel,
+          omega,
+          skirtFrontBox.min,
+          skirtFrontBox.max,
+          WALL_RESTITUTION,
+          WALL_MU
+        );
+
+
+        reflectOffPlane(
+            prevPos,
+            pos,
+            vel,
+            omega,
+
+            riserPlane.point,
+            riserPlane.normal,
+            riserPlane.uAxis,
+            riserPlane.vAxis,
+            riserPlane.uHalf,
+            riserPlane.vHalf,
+
+            WALL_RESTITUTION,
+            WALL_MU
+        );
+
+                // Ledge collisions
+        for (const plane of ledgePlanes) {
+          reflectOffPlane(
+            prevPos,
+            pos,
+            vel,
+            omega,
+
+            plane.point,
+            plane.normal,
+            plane.uAxis,
+            plane.vAxis,
+            plane.uHalf,
+            plane.vHalf,
+
+            WALL_RESTITUTION,
+            WALL_MU
+          );
         }
 
         reflectOffBox(pos, vel, omega, mainPierBodyBox.min, mainPierBodyBox.max, BUTTRESS_RESTITUTION, BUTTRESS_MU);
         reflectOffBox(pos, vel, omega, sidePierBodyBox.min, sidePierBodyBox.max, BUTTRESS_RESTITUTION, BUTTRESS_MU);
         for (const plane of mainPierRoofPlanes) {
-          reflectOffPlane(pos, vel, omega, plane.point, plane.normal, plane.uAxis, plane.vAxis, plane.uHalf, plane.vHalf, BUTTRESS_RESTITUTION, BUTTRESS_MU);
+          reflectOffPlane(prevPos, pos, vel, omega, plane.point, plane.normal, plane.uAxis, plane.vAxis, plane.uHalf, plane.vHalf, BUTTRESS_RESTITUTION, BUTTRESS_MU);
         }
         for (const plane of sidePierRoofPlanes) {
-          reflectOffPlane(pos, vel, omega, plane.point, plane.normal, plane.uAxis, plane.vAxis, plane.uHalf, plane.vHalf, BUTTRESS_RESTITUTION, BUTTRESS_MU);
+          reflectOffPlane(prevPos, pos, vel, omega, plane.point, plane.normal, plane.uAxis, plane.vAxis, plane.uHalf, plane.vHalf, BUTTRESS_RESTITUTION, BUTTRESS_MU);
         }
 
         points.push(pos.clone());
@@ -952,24 +1192,15 @@ function App() {
     >
       <style>{`
         .app-root {
-          /* Fallback for very old browsers with neither dvh nor
-             visualViewport support: plain 100vh (may include the
-             address-bar area, but is still better than nothing). */
           height: 100vh;
         }
         @supports not (height: 100dvh) {
           .app-root {
-            /* Fallback for browsers with visualViewport/resize support
-               but no dvh: JS-tracked real visible height (see the
-               setAppVh effect above). */
             height: calc(var(--app-vh, 1vh) * 100);
           }
         }
         @supports (height: 100dvh) {
           .app-root {
-            /* Modern browsers: this alone already tracks the true
-               visible height as the address bar shows/hides, no JS
-               needed. */
             height: 100dvh;
           }
         }
