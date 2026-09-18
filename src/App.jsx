@@ -8,10 +8,18 @@ function App() {
   const applyHeightRef = useRef(() => {});
   const resetViewRef = useRef(() => {});
   const toggleButtressRef = useRef(() => {});
+  const findHoleShotsRef = useRef(() => {});
+  const playHoleShotsRef = useRef(() => {});
+  const onHoleShotsFoundRef = useRef(null);
+  const [holeShotsFound, setHoleShotsFound] = useState(0);
+
+  useEffect(() => {
+    onHoleShotsFoundRef.current = setHoleShotsFound;
+  }, []);
 
   const [aim, setAim] = useState(0);
-  const [loft, setLoft] = useState(20);
-  const [power, setPower] = useState(80);
+  const [loft, setLoft] = useState(0);
+  const [power, setPower] = useState(100);
   const [height, setHeight] = useState(1); // metres above the floor at the strike point
   const [topspin, setTopspin] = useState(0);
   const [sidespin, setSidespin] = useState(0);
@@ -567,11 +575,11 @@ function App() {
 
       const currentlyTouching = distNow >= 0 && distNow <= BALL_RADIUS;
       const tunnelledThrough = distPrev > BALL_RADIUS && distNow <= BALL_RADIUS;
-      if (!currentlyTouching && !tunnelledThrough) return;
+      if (!currentlyTouching && !tunnelledThrough) return false;
 
       const uCoord = relNow.dot(uAxis);
       const vCoord = relNow.dot(vAxis);
-      if (Math.abs(uCoord) > uHalf || Math.abs(vCoord) > vHalf) return;
+      if (Math.abs(uCoord) > uHalf || Math.abs(vCoord) > vHalf) return false;
 
       pos.addScaledVector(planeNormal, BALL_RADIUS - distNow);
       const speedIntoPlane = vel.dot(planeNormal);
@@ -579,7 +587,9 @@ function App() {
         const normalSpeedBefore = Math.abs(speedIntoPlane);
         vel.addScaledVector(planeNormal, -(1 + restitution) * speedIntoPlane);
         applySpinFriction(vel, omega, planeNormal, mu, restitution, normalSpeedBefore);
+        return true;
       }
+      return false;
     }
 
     function getRoofPlanes(pier) {
@@ -947,8 +957,9 @@ function App() {
           const normalSpeedBefore = Math.abs(speedIntoWall);
           vel.addScaledVector(normal, -(1 + restitution) * speedIntoWall);
           applySpinFriction(vel, omega, normal, mu, restitution, normalSpeedBefore);
+          return true;
         }
-        return;
+        return false;
       }
 
       const closest = new THREE.Vector3(
@@ -967,11 +978,13 @@ function App() {
           const normalSpeedBefore = Math.abs(speedIntoWall);
           vel.addScaledVector(normal, -(1 + restitution) * speedIntoWall);
           applySpinFriction(vel, omega, normal, mu, restitution, normalSpeedBefore);
+          return true;
         }
       }
+      return false;
     }
 
-    function computeTrajectory(aimDeg, powerPct, loftDeg, topspinPct, sidespinPct) {
+    function buildInitialState(aimDeg, powerPct, loftDeg, topspinPct, sidespinPct) {
       const aimRad = (aimDeg * Math.PI) / 180;
       const loftRad = (loftDeg * Math.PI) / 180;
       const speed = 1.52 + (powerPct / 100) * 13.7;
@@ -989,143 +1002,107 @@ function App() {
       omega.addScaledVector(topAxis, (topspinPct / 100) * MAX_SPIN_RADPS);
       omega.addScaledVector(new THREE.Vector3(0, 1, 0), (sidespinPct / 100) * MAX_SPIN_RADPS);
 
-      const points = [pos.clone()];
-      let t = 0;
+      return { pos, vel, omega, floorBounced: false, hitAboveLedgeBeforeFloor: false, holeRattleCount: 0 };
+    }
 
-      while (t < MAX_TIME) {
-        const prevPos = pos.clone();
-        vel.y -= GRAVITY * DT;
-        pos.addScaledVector(vel, DT);
+    // One physics step, mutating state.pos / state.vel / state.omega in place.
+    // This is exactly the body that used to live inline in computeTrajectory's while loop.
+    function advanceBall(state, dt) {
+      const { pos, vel, omega } = state;
+      const prevPos = pos.clone();
 
-        const floorY = floorHeightAt(pos.z);
-        if (pos.y - BALL_RADIUS < floorY && vel.y < 0) {
-          const normalSpeedBefore = Math.abs(vel.y);
-          pos.y = floorY + BALL_RADIUS;
-          vel.y = -vel.y * FLOOR_RESTITUTION;
-          applySpinFriction(vel, omega, new THREE.Vector3(0, 1, 0), FLOOR_MU, FLOOR_RESTITUTION, normalSpeedBefore);
+      vel.y -= GRAVITY * dt;
+      pos.addScaledVector(vel, dt);
+
+      const floorY = floorHeightAt(pos.z);
+      if (pos.y - BALL_RADIUS < floorY && vel.y < 0) {
+        const normalSpeedBefore = Math.abs(vel.y);
+        pos.y = floorY + BALL_RADIUS;
+        vel.y = -vel.y * FLOOR_RESTITUTION;
+        applySpinFriction(vel, omega, new THREE.Vector3(0, 1, 0), FLOOR_MU, FLOOR_RESTITUTION, normalSpeedBefore);
+        state.floorBounced = true;
+      }
+
+      const WALL_HALF_THICKNESS = 0.075;
+      let currentLeftWallX = -0.08 + WALL_HALF_THICKNESS;
+      let currentRightWallX = COURT_WIDTH + 0.08 - WALL_HALF_THICKNESS;
+      let currentFrontWallZ = -0.08 + WALL_HALF_THICKNESS;
+
+      const bevelBaseY = (pos.z < TOP_STEP_DEPTH) ? LEDGE2_BASE_Y : LEDGE2_BACK_Y;
+      const bevelTopY = bevelBaseY + BEVEL_DROP;
+
+      const aboveLedge = pos.y > bevelTopY;
+      if (aboveLedge) {
+        currentLeftWallX = -0.08 - UPPER_WALL_SETBACK + WALL_HALF_THICKNESS;
+        currentRightWallX = COURT_WIDTH + 0.08 + UPPER_WALL_SETBACK - WALL_HALF_THICKNESS;
+        currentFrontWallZ = -0.08 - UPPER_WALL_SETBACK + WALL_HALF_THICKNESS;
+      }
+
+      if (pos.z - BALL_RADIUS < currentFrontWallZ) {
+        const normalSpeedBefore = Math.abs(vel.z);
+        pos.z = currentFrontWallZ + BALL_RADIUS;
+        vel.z = -vel.z * WALL_RESTITUTION;
+        applySpinFriction(vel, omega, new THREE.Vector3(0, 0, 1), WALL_MU, WALL_RESTITUTION, normalSpeedBefore);
+        if (aboveLedge && !state.floorBounced) {
+          state.hitAboveLedgeBeforeFloor = true;
         }
+      }
 
-        // 1. Determine dynamic wall boundaries based on the inner playing surfaces
-        const WALL_HALF_THICKNESS = 0.075; // 0.15 / 2
+      if (pos.x - BALL_RADIUS < currentLeftWallX) {
+        const normalSpeedBefore = Math.abs(vel.x);
+        pos.x = currentLeftWallX + BALL_RADIUS;
+        vel.x = -vel.x * WALL_RESTITUTION;
+        applySpinFriction(vel, omega, new THREE.Vector3(1, 0, 0), WALL_MU, WALL_RESTITUTION, normalSpeedBefore);
+      }
+      if (pos.x + BALL_RADIUS > currentRightWallX) {
+        const normalSpeedBefore = Math.abs(vel.x);
+        pos.x = currentRightWallX - BALL_RADIUS;
+        vel.x = -vel.x * WALL_RESTITUTION;
+        applySpinFriction(vel, omega, new THREE.Vector3(-1, 0, 0), WALL_MU, WALL_RESTITUTION, normalSpeedBefore);
+      }
 
-        // Base inner surface positions for lower walls
-        let currentLeftWallX = -0.08 + WALL_HALF_THICKNESS;               // Inner surface at -0.005
-        let currentRightWallX = COURT_WIDTH + 0.08 - WALL_HALF_THICKNESS; // Inner surface at COURT_WIDTH + 0.005
-        let currentFrontWallZ = -0.08 + WALL_HALF_THICKNESS;              // Inner surface at -0.005
+      reflectOffBox(pos, vel, omega, skirtLeftBox.min, skirtLeftBox.max, WALL_RESTITUTION, WALL_MU);
+      reflectOffBox(pos, vel, omega, skirtRightBox.min, skirtRightBox.max, WALL_RESTITUTION, WALL_MU);
+      reflectOffBox(pos, vel, omega, skirtFrontBox.min, skirtFrontBox.max, WALL_RESTITUTION, WALL_MU);
 
-        let floorZoneZ = pos.z;
-        let bevelBaseY = (floorZoneZ < TOP_STEP_DEPTH) ? LEDGE2_BASE_Y : LEDGE2_BACK_Y;
-        let bevelTopY = bevelBaseY + BEVEL_DROP;
+      reflectOffPlane(
+        prevPos, pos, vel, omega,
+        riserPlane.point, riserPlane.normal, riserPlane.uAxis, riserPlane.vAxis, riserPlane.uHalf, riserPlane.vHalf,
+        WALL_RESTITUTION, WALL_MU
+      );
 
-        // Push boundaries outward if the ball is above the sloped bevel ledge
-        if (pos.y > bevelTopY) {
-            currentLeftWallX = -0.08 - UPPER_WALL_SETBACK + WALL_HALF_THICKNESS;               // -0.005 - UPPER_WALL_SETBACK
-            currentRightWallX = COURT_WIDTH + 0.08 + UPPER_WALL_SETBACK - WALL_HALF_THICKNESS; // COURT_WIDTH + 0.005 + UPPER_WALL_SETBACK
-            currentFrontWallZ = -0.08 - UPPER_WALL_SETBACK + WALL_HALF_THICKNESS;
-        }
-
-        // 2. Apply boundary checks using the dynamic variables
-        if (pos.z - BALL_RADIUS < currentFrontWallZ) {
-          const normalSpeedBefore = Math.abs(vel.z);
-          pos.z = currentFrontWallZ + BALL_RADIUS;
-          vel.z = -vel.z * WALL_RESTITUTION;
-          applySpinFriction(vel, omega, new THREE.Vector3(0, 0, 1), WALL_MU, WALL_RESTITUTION, normalSpeedBefore);
-        }
-        if (pos.x - BALL_RADIUS < currentLeftWallX) {
-          const normalSpeedBefore = Math.abs(vel.x);
-          pos.x = currentLeftWallX + BALL_RADIUS;
-          vel.x = -vel.x * WALL_RESTITUTION;
-          applySpinFriction(vel, omega, new THREE.Vector3(1, 0, 0), WALL_MU, WALL_RESTITUTION, normalSpeedBefore);
-        }
-        if (pos.x + BALL_RADIUS > currentRightWallX) {
-          const normalSpeedBefore = Math.abs(vel.x);
-          pos.x = currentRightWallX - BALL_RADIUS;
-          vel.x = -vel.x * WALL_RESTITUTION;
-          applySpinFriction(vel, omega, new THREE.Vector3(-1, 0, 0), WALL_MU, WALL_RESTITUTION, normalSpeedBefore);
-        }
-
-        reflectOffBox(
-          pos,
-          vel,
-          omega,
-          skirtLeftBox.min,
-          skirtLeftBox.max,
-          WALL_RESTITUTION,
-          WALL_MU
-        );
-
-        reflectOffBox(
-          pos,
-          vel,
-          omega,
-          skirtRightBox.min,
-          skirtRightBox.max,
-          WALL_RESTITUTION,
-          WALL_MU
-        );
-
-        reflectOffBox(
-          pos,
-          vel,
-          omega,
-          skirtFrontBox.min,
-          skirtFrontBox.max,
-          WALL_RESTITUTION,
-          WALL_MU
-        );
-
-
+      for (const plane of ledgePlanes) {
         reflectOffPlane(
-            prevPos,
-            pos,
-            vel,
-            omega,
-
-            riserPlane.point,
-            riserPlane.normal,
-            riserPlane.uAxis,
-            riserPlane.vAxis,
-            riserPlane.uHalf,
-            riserPlane.vHalf,
-
-            WALL_RESTITUTION,
-            WALL_MU
+          prevPos, pos, vel, omega,
+          plane.point, plane.normal, plane.uAxis, plane.vAxis, plane.uHalf, plane.vHalf,
+          WALL_RESTITUTION, WALL_MU
         );
+      }
 
-                // Ledge collisions
-        for (const plane of ledgePlanes) {
-          reflectOffPlane(
-            prevPos,
-            pos,
-            vel,
-            omega,
+      const hitMainPier = reflectOffBox(pos, vel, omega, mainPierBodyBox.min, mainPierBodyBox.max, BUTTRESS_RESTITUTION, BUTTRESS_MU);
+      const hitSidePier = reflectOffBox(pos, vel, omega, sidePierBodyBox.min, sidePierBodyBox.max, BUTTRESS_RESTITUTION, BUTTRESS_MU);
+      if ((hitMainPier || hitSidePier) && isNearHolePocket(pos)) {
+        state.holeRattleCount++;
+      }
+      for (const plane of mainPierRoofPlanes) {
+        reflectOffPlane(prevPos, pos, vel, omega, plane.point, plane.normal, plane.uAxis, plane.vAxis, plane.uHalf, plane.vHalf, BUTTRESS_RESTITUTION, BUTTRESS_MU);
+      }
+      for (const plane of sidePierRoofPlanes) {
+        reflectOffPlane(prevPos, pos, vel, omega, plane.point, plane.normal, plane.uAxis, plane.vAxis, plane.uHalf, plane.vHalf, BUTTRESS_RESTITUTION, BUTTRESS_MU);
+      }
+    }
 
-            plane.point,
-            plane.normal,
-            plane.uAxis,
-            plane.vAxis,
-            plane.uHalf,
-            plane.vHalf,
-
-            WALL_RESTITUTION,
-            WALL_MU
-          );
-        }
-
-        reflectOffBox(pos, vel, omega, mainPierBodyBox.min, mainPierBodyBox.max, BUTTRESS_RESTITUTION, BUTTRESS_MU);
-        reflectOffBox(pos, vel, omega, sidePierBodyBox.min, sidePierBodyBox.max, BUTTRESS_RESTITUTION, BUTTRESS_MU);
-        for (const plane of mainPierRoofPlanes) {
-          reflectOffPlane(prevPos, pos, vel, omega, plane.point, plane.normal, plane.uAxis, plane.vAxis, plane.uHalf, plane.vHalf, BUTTRESS_RESTITUTION, BUTTRESS_MU);
-        }
-        for (const plane of sidePierRoofPlanes) {
-          reflectOffPlane(prevPos, pos, vel, omega, plane.point, plane.normal, plane.uAxis, plane.vAxis, plane.uHalf, plane.vHalf, BUTTRESS_RESTITUTION, BUTTRESS_MU);
-        }
-
-        points.push(pos.clone());
-        t += DT;
-
-        if (vel.length() < 0.2 && pos.y - floorY < 0.015) break;
-        if (pos.z > TOTAL_DEPTH + 1) break;
+    function computeTrajectory(aimDeg, powerPct, loftDeg, topspinPct, sidespinPct, dt = DT) {
+      const state = buildInitialState(aimDeg, powerPct, loftDeg, topspinPct, sidespinPct);
+      const points = [state.pos.clone()];
+      let t = 0;
+      while (t < MAX_TIME) {
+        advanceBall(state, dt);
+        points.push(state.pos.clone());
+        t += dt;
+        const floorY = floorHeightAt(state.pos.z);
+        if (state.vel.length() < 0.2 && state.pos.y - floorY < 0.015) break;
+        if (state.pos.z > TOTAL_DEPTH + 1) break;
       }
       return points;
     }
@@ -1137,8 +1114,124 @@ function App() {
       trajectoryLine.geometry.dispose();
       trajectoryLine.geometry = new THREE.BufferGeometry().setFromPoints(points);
       activeFlight = { points, startTime: performance.now() };
+      return points;
     }
     fireShotRef.current = fireShot;
+    
+    // ---- Define "the hole" target zone ----
+    const HOLE_X_MIN = SIDE_PIER.x + SIDE_PIER.width / 2;
+    const HOLE_X_MAX = MAIN_PIER.x + MAIN_PIER.depth / 2;
+    const HOLE_Z_MIN = TOP_STEP_DEPTH;
+    const HOLE_Z_MAX = MAIN_PIER.z - MAIN_PIER.width / 2;
+    const HOLE_Y_MIN = floorHeightAt(TOP_STEP_DEPTH);
+    const HOLE_Y_MAX = HOLE_Y_MIN + 0.5;
+
+    const HOLE_MIN = new THREE.Vector3(HOLE_X_MIN, HOLE_Y_MIN, HOLE_Z_MIN);
+    const HOLE_MAX = new THREE.Vector3(HOLE_X_MAX, HOLE_Y_MAX, HOLE_Z_MAX);
+
+    // Visual marker
+    const holeTargetMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(HOLE_MAX.x - HOLE_MIN.x, HOLE_MAX.y - HOLE_MIN.y, HOLE_MAX.z - HOLE_MIN.z),
+      new THREE.MeshBasicMaterial({ color: 0x4ade80, transparent: true, opacity: 0 })
+    );
+    holeTargetMesh.position.set(
+      (HOLE_MIN.x + HOLE_MAX.x) / 2,
+      (HOLE_MIN.y + HOLE_MAX.y) / 2,
+      (HOLE_MIN.z + HOLE_MAX.z) / 2
+    );
+    scene.add(holeTargetMesh);
+
+    function isInsideHole(pos) {
+      return (
+        pos.x >= HOLE_MIN.x && pos.x <= HOLE_MAX.x &&
+        pos.y >= HOLE_MIN.y && pos.y <= HOLE_MAX.y &&
+        pos.z >= HOLE_MIN.z && pos.z <= HOLE_MAX.z
+      );
+    }
+
+    // Broader than the hole box itself (and ignores height) — used only to
+    // decide whether a pier bounce counts as "rattling in the pocket" rather
+    // than the ball clipping a pier somewhere else on the court.
+    function isNearHolePocket(pos) {
+      return (
+        pos.x >= HOLE_X_MIN - 0.05 && pos.x <= HOLE_X_MAX + 0.05 &&
+        pos.z >= HOLE_Z_MIN - 0.05 && pos.z <= HOLE_Z_MAX + 0.05
+      );
+    }
+
+    const SEARCH_DT = DT * 3;
+    const MIN_RATTLES = 2; // require at least this many pocket-wall bounces
+
+    function simulateShotForSearch(aimDeg, powerPct, loftDeg, topspinPct, sidespinPct) {
+      const state = buildInitialState(aimDeg, powerPct, loftDeg, topspinPct, sidespinPct);
+      let enteredHole = isInsideHole(state.pos);
+
+      let t = 0;
+      while (t < MAX_TIME) {
+        advanceBall(state, SEARCH_DT);
+        if (!enteredHole && isInsideHole(state.pos)) enteredHole = true;
+        t += SEARCH_DT;
+        const floorY = floorHeightAt(state.pos.z);
+        if (state.vel.length() < 0.2 && state.pos.y - floorY < 0.015) break;
+        if (state.pos.z > TOTAL_DEPTH + 1) break;
+      }
+
+      return {
+        enteredHole,
+        legit: state.hitAboveLedgeBeforeFloor,
+        rattled: state.holeRattleCount >= MIN_RATTLES,
+      };
+    }
+
+    function downsample(arr, n) {
+      if (arr.length <= n) return arr;
+      const out = [];
+      const step = (arr.length - 1) / (n - 1);
+      for (let i = 0; i < n; i++) {
+        out.push(arr[Math.round(i * step)]);
+      }
+      return out;
+    }
+
+    let foundHoleShots = [];
+
+    function findHoleShots(topspinPct = 0, sidespinPct = 0, maxResults = 6) {
+      const matches = [];
+      const AIM_STEP = 6, LOFT_STEP = 10, POWER_STEP = 12;
+
+      for (let aimDeg = -90; aimDeg <= 90; aimDeg += AIM_STEP) {
+        for (let loftDeg = -30; loftDeg <= 80; loftDeg += LOFT_STEP) {
+          for (let powerPct = 10; powerPct <= 200; powerPct += POWER_STEP) {
+            const result = simulateShotForSearch(aimDeg, powerPct, loftDeg, topspinPct, sidespinPct);
+            if (result.enteredHole && result.legit && result.rattled) {
+              matches.push({ aim: aimDeg, power: powerPct, loft: loftDeg, topspin: topspinPct, sidespin: sidespinPct });
+            }
+          }
+        }
+      }
+
+      foundHoleShots = downsample(matches, maxResults);
+      if (onHoleShotsFoundRef.current) onHoleShotsFoundRef.current(foundHoleShots.length);
+      return foundHoleShots;
+    }
+
+    function playHoleShots() {
+      if (!foundHoleShots.length) return;
+      let i = 0;
+      function playNext() {
+        if (i >= foundHoleShots.length) return;
+        const shot = foundHoleShots[i];
+        const points = fireShot(shot.aim, shot.power, shot.loft, shot.topspin, shot.sidespin);
+        i++;
+        const durationMs = points.length * DT * 1000;
+        setTimeout(playNext, durationMs + 400);
+      }
+      playNext();
+    }
+
+    findHoleShotsRef.current = findHoleShots;
+    playHoleShotsRef.current = playHoleShots;
+
 
     let frameId;
     function animate() {
@@ -1334,13 +1427,19 @@ function App() {
         style={{ position: 'absolute', top: 16, right: 16, display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 10, maxWidth: '50vw' }}
       >
         <button style={cornerButtonStyle} onClick={() => resetViewRef.current()}>
-          Reset view
+          Original View
         </button>
         <button style={cornerButtonStyle} onClick={() => toggleButtressRef.current()}>
           Toggle buttress
         </button>
         <button style={cornerButtonStyle} onClick={() => setControlsOpen((o) => !o)}>
           {controlsOpen ? 'Hide' : 'Show'} shot settings
+        </button>
+        <button style={cornerButtonStyle} onClick={() => findHoleShotsRef.current(topspin, sidespin)}>
+          Find hole shots
+        </button>
+        <button style={cornerButtonStyle} onClick={() => playHoleShotsRef.current()}>
+          Play hole shots ({holeShotsFound})
         </button>
       </div>
 
@@ -1360,7 +1459,7 @@ function App() {
           </div>
           <div className="control-field" style={fieldStyle}>
             <label>Power: {power}%</label>
-            <input type="range" min={0} max={175} value={power} onChange={(e) => setPower(Number(e.target.value))} />
+            <input type="range" min={0} max={200} value={power} onChange={(e) => setPower(Number(e.target.value))} />
           </div>
           <div className="control-field" style={fieldStyle}>
             <label>Topspin: {topspin}</label>
