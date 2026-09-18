@@ -12,6 +12,7 @@ function App() {
   const playHoleShotsRef = useRef(() => {});
   const onHoleShotsFoundRef = useRef(null);
   const [holeShotsFound, setHoleShotsFound] = useState(0);
+  const [maxShotHeight, setMaxShotHeight] = useState(3);
 
   useEffect(() => {
     onHoleShotsFoundRef.current = setHoleShotsFound;
@@ -899,7 +900,7 @@ function App() {
     const GRAVITY = 9.81;
     const DT = 1 / 120;
     const MAX_TIME = 8;
-    const MAX_SPIN_RADPS = 100;
+    const MAX_SPIN_RADPS = 300;
 
     const FLOOR_RESTITUTION = 0.7;
     const FLOOR_MU = 0.45;
@@ -1162,24 +1163,38 @@ function App() {
     const SEARCH_DT = DT * 3;
     const MIN_RATTLES = 2; // require at least this many pocket-wall bounces
 
-    function simulateShotForSearch(aimDeg, powerPct, loftDeg, topspinPct, sidespinPct) {
+    function simulateShotForSearch(aimDeg, powerPct, loftDeg, topspinPct, sidespinPct, maxHeightLimit = Infinity) {
       const state = buildInitialState(aimDeg, powerPct, loftDeg, topspinPct, sidespinPct);
       let enteredHole = isInsideHole(state.pos);
-
+      let floorBeforeHoleOK = !state.floorBounced; // true unless it's somehow already bounced at t=0
+      let peakHeightAboveFloor = state.pos.y - floorHeightAt(state.pos.z);
+    
       let t = 0;
       while (t < MAX_TIME) {
         advanceBall(state, SEARCH_DT);
-        if (!enteredHole && isInsideHole(state.pos)) enteredHole = true;
+    
+        const heightAboveFloor = state.pos.y - floorHeightAt(state.pos.z);
+        if (heightAboveFloor > peakHeightAboveFloor) peakHeightAboveFloor = heightAboveFloor;
+    
+        if (!enteredHole && isInsideHole(state.pos)) {
+          enteredHole = true;
+          // Capture whether the floor had already been touched by this exact
+          // moment — this is the "no floor bounce before the hole" check.
+          floorBeforeHoleOK = !state.floorBounced;
+        }
+    
         t += SEARCH_DT;
         const floorY = floorHeightAt(state.pos.z);
         if (state.vel.length() < 0.2 && state.pos.y - floorY < 0.015) break;
         if (state.pos.z > TOTAL_DEPTH + 1) break;
       }
-
+    
       return {
         enteredHole,
         legit: state.hitAboveLedgeBeforeFloor,
         rattled: state.holeRattleCount >= MIN_RATTLES,
+        noFloorBeforeHole: floorBeforeHoleOK,
+        withinHeightLimit: peakHeightAboveFloor <= maxHeightLimit,
       };
     }
 
@@ -1195,21 +1210,23 @@ function App() {
 
     let foundHoleShots = [];
 
-    function findHoleShots(topspinPct = 0, sidespinPct = 0, maxResults = 6) {
+    function findHoleShots(topspinPct = 0, sidespinPct = 0, maxHeightLimit = Infinity, maxResults = 6) {
       const matches = [];
-      const AIM_STEP = 6, LOFT_STEP = 10, POWER_STEP = 12;
-
+      const AIM_STEP = 3, LOFT_STEP = 5, POWER_STEP = 6, SPIN_STEP = 40;
+    
       for (let aimDeg = -90; aimDeg <= 90; aimDeg += AIM_STEP) {
-        for (let loftDeg = -30; loftDeg <= 80; loftDeg += LOFT_STEP) {
-          for (let powerPct = 10; powerPct <= 200; powerPct += POWER_STEP) {
-            const result = simulateShotForSearch(aimDeg, powerPct, loftDeg, topspinPct, sidespinPct);
-            if (result.enteredHole && result.legit && result.rattled) {
-              matches.push({ aim: aimDeg, power: powerPct, loft: loftDeg, topspin: topspinPct, sidespin: sidespinPct });
+        for (let loftDeg = -30; loftDeg <= 90; loftDeg += LOFT_STEP) {
+          for (let powerPct = 10; powerPct <= 140; powerPct += POWER_STEP) {
+            for (let topspinPct = -80; topspinPct <= 0; topspinPct += SPIN_STEP) {
+              const result = simulateShotForSearch(aimDeg, powerPct, loftDeg, topspinPct, sidespinPct, maxHeightLimit);
+              if (result.enteredHole && result.legit && result.rattled && result.noFloorBeforeHole && result.withinHeightLimit) {
+                matches.push({ aim: aimDeg, power: powerPct, loft: loftDeg, topspin: topspinPct, sidespin: sidespinPct });
+              }
             }
           }
         }
       }
-
+    
       foundHoleShots = downsample(matches, maxResults);
       if (onHoleShotsFoundRef.current) onHoleShotsFoundRef.current(foundHoleShots.length);
       return foundHoleShots;
@@ -1435,7 +1452,7 @@ function App() {
         <button style={cornerButtonStyle} onClick={() => setControlsOpen((o) => !o)}>
           {controlsOpen ? 'Hide' : 'Show'} shot settings
         </button>
-        <button style={cornerButtonStyle} onClick={() => findHoleShotsRef.current(topspin, sidespin)}>
+        <button style={cornerButtonStyle} onClick={() => findHoleShotsRef.current(topspin, sidespin, maxShotHeight)}>
           Find hole shots
         </button>
         <button style={cornerButtonStyle} onClick={() => playHoleShotsRef.current()}>
