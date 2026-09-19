@@ -13,6 +13,8 @@ function App() {
   const onHoleShotsFoundRef = useRef(null);
   const [holeShotsFound, setHoleShotsFound] = useState(0);
   const [maxShotHeight, setMaxShotHeight] = useState(3);
+  const [searchState, setSearchState] = useState({ running: false, progress: 0 });
+  const [foundShotsList, setFoundShotsList] = useState([]);
 
   useEffect(() => {
     onHoleShotsFoundRef.current = setHoleShotsFound;
@@ -900,7 +902,7 @@ function App() {
     const GRAVITY = 9.81;
     const DT = 1 / 120;
     const MAX_TIME = 8;
-    const MAX_SPIN_RADPS = 300;
+    const MAX_SPIN_RADPS = 500;
 
     const FLOOR_RESTITUTION = 0.7;
     const FLOOR_MU = 0.45;
@@ -1198,38 +1200,103 @@ function App() {
       };
     }
 
-    function downsample(arr, n) {
-      if (arr.length <= n) return arr;
-      const out = [];
-      const step = (arr.length - 1) / (n - 1);
-      for (let i = 0; i < n; i++) {
-        out.push(arr[Math.round(i * step)]);
+    // Normalizes each shot's params into [0,1]-ish ranges so no single
+    // parameter (e.g. power spanning 10-140) dominates the distance metric.
+    function normalizeShot(shot) {
+      return [
+        shot.aim / 90,
+        shot.loft / 90,
+        shot.power / 140,
+        shot.topspin / 80,
+      ];
+    }
+
+    function paramDistance(a, b) {
+      let sum = 0;
+      for (let i = 0; i < a.length; i++) {
+        const d = a[i] - b[i];
+        sum += d * d;
       }
-      return out;
+      return sum;
+    }
+
+    // Greedily picks `n` items that are maximally spread out from each other
+    // in parameter space, starting from the first match found.
+    function farthestPointSample(items, n) {
+      if (items.length <= n) return items;
+
+      const keys = items.map(normalizeShot);
+      const chosenIdx = [0];
+
+      while (chosenIdx.length < n) {
+        let bestIdx = -1;
+        let bestMinDist = -Infinity;
+
+        for (let i = 0; i < items.length; i++) {
+          if (chosenIdx.includes(i)) continue;
+          let minDist = Infinity;
+          for (const c of chosenIdx) {
+            const d = paramDistance(keys[i], keys[c]);
+            if (d < minDist) minDist = d;
+          }
+          if (minDist > bestMinDist) {
+            bestMinDist = minDist;
+            bestIdx = i;
+          }
+        }
+        chosenIdx.push(bestIdx);
+      }
+
+      return chosenIdx.map((i) => items[i]);
     }
 
     let foundHoleShots = [];
 
-    function findHoleShots(topspinPct = 0, sidespinPct = 0, maxHeightLimit = Infinity, maxResults = 6) {
+    function findHoleShots(topspinPct = 0, sidespinPct = 0, maxHeightLimit = Infinity, maxResults = 6, onProgress, onDone) {
       const matches = [];
       const AIM_STEP = 3, LOFT_STEP = 5, POWER_STEP = 6, SPIN_STEP = 40;
-    
-      for (let aimDeg = -90; aimDeg <= 90; aimDeg += AIM_STEP) {
-        for (let loftDeg = -30; loftDeg <= 90; loftDeg += LOFT_STEP) {
-          for (let powerPct = 10; powerPct <= 140; powerPct += POWER_STEP) {
-            for (let topspinPct = -80; topspinPct <= 0; topspinPct += SPIN_STEP) {
-              const result = simulateShotForSearch(aimDeg, powerPct, loftDeg, topspinPct, sidespinPct, maxHeightLimit);
-              if (result.enteredHole && result.legit && result.rattled && result.noFloorBeforeHole && result.withinHeightLimit) {
-                matches.push({ aim: aimDeg, power: powerPct, loft: loftDeg, topspin: topspinPct, sidespin: sidespinPct });
-              }
-            }
+
+      const aimVals = [];
+      for (let a = -90; a <= 90; a += AIM_STEP) aimVals.push(a);
+      const loftVals = [];
+      for (let l = -30; l <= 90; l += LOFT_STEP) loftVals.push(l);
+      const powerVals = [];
+      for (let p = 10; p <= 140; p += POWER_STEP) powerVals.push(p);
+      const topspinVals = [];
+      for (let ts = -80; ts <= 0; ts += SPIN_STEP) topspinVals.push(ts);
+
+      const combos = [];
+      for (const aimDeg of aimVals)
+        for (const loftDeg of loftVals)
+          for (const powerPct of powerVals)
+            for (const topspinPctInner of topspinVals)
+              combos.push([aimDeg, powerPct, loftDeg, topspinPctInner]);
+
+      let idx = 0;
+      const CHUNK_SIZE = 200; // combos per frame — tune if it still stutters
+
+      function processChunk() {
+        const end = Math.min(idx + CHUNK_SIZE, combos.length);
+        for (; idx < end; idx++) {
+          const [aimDeg, powerPct, loftDeg, topspinPctInner] = combos[idx];
+          const result = simulateShotForSearch(aimDeg, powerPct, loftDeg, topspinPctInner, sidespinPct, maxHeightLimit);
+          if (result.enteredHole && result.legit && result.rattled && result.noFloorBeforeHole && result.withinHeightLimit) {
+            matches.push({ aim: aimDeg, power: powerPct, loft: loftDeg, topspin: topspinPctInner, sidespin: sidespinPct });
           }
         }
+
+        if (onProgress) onProgress(idx / combos.length);
+
+        if (idx < combos.length) {
+          requestAnimationFrame(processChunk);
+        } else {
+          foundHoleShots = farthestPointSample(matches, maxResults);
+          if (onHoleShotsFoundRef.current) onHoleShotsFoundRef.current(foundHoleShots.length);
+          if (onDone) onDone(foundHoleShots);
+        }
       }
-    
-      foundHoleShots = downsample(matches, maxResults);
-      if (onHoleShotsFoundRef.current) onHoleShotsFoundRef.current(foundHoleShots.length);
-      return foundHoleShots;
+
+      processChunk();
     }
 
     function playHoleShots() {
@@ -1321,7 +1388,7 @@ function App() {
 
   const panelStyle = {
     position: 'absolute', bottom: 96, left: '50%', transform: 'translateX(-50%)',
-    background: 'rgba(26, 28, 31, 0.85)', border: '1px solid rgba(255,255,255,0.08)',
+    background: 'rgba(46, 49, 53, 0.23)', border: '1px solid rgba(255,255,255,0.08)',
     borderRadius: 10, padding: '16px 22px', display: 'flex', flexWrap: 'wrap',
     gap: 18, alignItems: 'center', justifyContent: 'center', maxWidth: '92vw',
     color: '#e9e6df', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', fontSize: 13,
@@ -1338,7 +1405,7 @@ function App() {
     boxShadow: '0 4px 14px rgba(0,0,0,0.35)', WebkitTapHighlightColor: 'transparent',
   };
   const cornerButtonStyle = {
-    background: 'rgba(26, 28, 31, 0.85)', color: '#e9e6df', border: '1px solid rgba(255,255,255,0.15)',
+    background: 'rgba(107, 104, 98, 0.85)', color: '#e9e6df', border: '1px solid rgba(255,255,255,0.15)',
     borderRadius: 8, padding: '10px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
     WebkitTapHighlightColor: 'transparent',
   };
@@ -1420,7 +1487,7 @@ function App() {
               feedback is really really appreciated! Instructions for how to use this are in the top left.
             </p>
             <p style={{ margin: '22px 0 0', fontSize: 13, color: '#8f8a7d' }}>
-              Tap or press space to continue
+              Tap, click or press space to continue
             </p>
           </div>
         </div>
@@ -1452,13 +1519,54 @@ function App() {
         <button style={cornerButtonStyle} onClick={() => setControlsOpen((o) => !o)}>
           {controlsOpen ? 'Hide' : 'Show'} shot settings
         </button>
-        <button style={cornerButtonStyle} onClick={() => findHoleShotsRef.current(topspin, sidespin, maxShotHeight)}>
-          Find hole shots
+        <button
+          style={cornerButtonStyle}
+          disabled={searchState.running}
+          onClick={() => {
+            setSearchState({ running: true, progress: 0 });
+            setFoundShotsList([]); // clear old results while a new search runs
+            findHoleShotsRef.current(
+              topspin, sidespin, maxShotHeight, 6,
+              (progress) => setSearchState({ running: true, progress }),
+              (shots) => {
+                setSearchState({ running: false, progress: 1 });
+                setFoundShotsList(shots);
+              }
+            );
+          }}
+        >
+          {searchState.running ? `Searching… ${Math.round(searchState.progress * 100)}%` : 'Find "decent" shots'}
         </button>
         <button style={cornerButtonStyle} onClick={() => playHoleShotsRef.current()}>
-          Play hole shots ({holeShotsFound})
+          Play "decent" shots ({holeShotsFound})
         </button>
       </div>
+
+      {foundShotsList.length > 0 && (
+        <div
+          style={{
+            position: 'absolute', bottom: controlsOpen ? 260 : 140, left: '50%', transform: 'translateX(-50%)',
+            display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', maxWidth: '92vw',
+          }}
+        >
+          {foundShotsList.map((shot, i) => (
+            <button
+              key={i}
+              style={{ ...cornerButtonStyle, padding: '6px 10px', fontSize: 11 }}
+              onClick={() => {
+                setAim(shot.aim);
+                setLoft(shot.loft);
+                setPower(shot.power);
+                setTopspin(shot.topspin);
+                setSidespin(shot.sidespin);
+                fireShotRef.current(shot.aim, shot.power, shot.loft, shot.topspin, shot.sidespin);
+              }}
+            >
+              Shot {i + 1}: aim {shot.aim}° / loft {shot.loft}° / pwr {shot.power}%
+            </button>
+          ))}
+        </div>
+      )}
 
       {controlsOpen && (
         <div className="control-panel" style={panelStyle}>
@@ -1485,6 +1593,10 @@ function App() {
           <div className="control-field" style={fieldStyle}>
             <label>Sidespin: {sidespin}</label>
             <input type="range" min={-100} max={100} value={sidespin} onChange={(e) => setSidespin(Number(e.target.value))} />
+          </div>
+          <div className="control-field" style={fieldStyle}>
+            <label>Max shot height: {maxShotHeight.toFixed(1)} m</label>
+            <input type="range" min={0.5} max={4} step={0.1} value={maxShotHeight} onChange={(e) => setMaxShotHeight(Number(e.target.value))} />
           </div>
         </div>
       )}
